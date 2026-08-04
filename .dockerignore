@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+.git/
+docker-compose*.yml
+Dockerfile*
+*.user
+*.suo
+*.DS_Store
+node_modules/
+.idea/
+*.log
+.env
