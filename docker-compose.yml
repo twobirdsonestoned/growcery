@@ -1,0 +1,21 @@
+
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mvc-app-dev
+    ports:
+      - "5001:5000"          # host:container
+    volumes:
+      - ./:/app:cached      # mount project root into /app in container
+      # Optionally mount your local NuGet package cache to speed restores (Linux/macOS):
+      - ~/.nuget/packages:/root/.nuget/packages:ro
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - DOTNET_USE_POLLING_FILE_WATCHER=1
+      - ASPNETCORE_URLS=http://+:5000
+    command: ["dotnet", "watch", "run", "--urls", "http://0.0.0.0:5000"]
+    stdin_open: true
+    tty: true
