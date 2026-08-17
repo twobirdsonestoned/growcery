@@ -16,6 +16,30 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - DOTNET_USE_POLLING_FILE_WATCHER=1
       - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=growcery;Username=growcery;Password=${POSTGRES_PASSWORD:-growcery_dev_pw}
     command: ["dotnet", "watch", "run", "--urls", "http://0.0.0.0:5000"]
     stdin_open: true
     tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_DB=growcery
+      - POSTGRES_USER=growcery
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-growcery_dev_pw}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U growcery -d growcery"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+
