@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     image: mvc-app-dev
     ports:
-      - "5001:5000"          # host:container
+      - "3030:3030"          # host:container
     volumes:
       - ./:/app:cached      # mount project root into /app in container
       # Optionally mount your local NuGet package cache to speed restores (Linux/macOS):
@@ -15,9 +15,9 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - DOTNET_USE_POLLING_FILE_WATCHER=1
-      - ASPNETCORE_URLS=http://+:5000
+      - ASPNETCORE_URLS=http://+:3030
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=growcery;Username=growcery;Password=${POSTGRES_PASSWORD:-growcery_dev_pw}
-    command: ["dotnet", "watch", "run", "--urls", "http://0.0.0.0:5000"]
+    command: ["dotnet", "watch", "run", "--no-launch-profile"]
     stdin_open: true
     tty: true
     depends_on:
