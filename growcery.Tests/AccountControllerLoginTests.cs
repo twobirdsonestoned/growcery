@@ -61,7 +61,7 @@ public class AccountControllerLoginTests : IClassFixture<GrowceryWebApplicationF
             Password = "WrongPassword!",
         });
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.False(response.Headers.TryGetValues("Set-Cookie", out _), "Did not expect a Set-Cookie header on a failed login response.");
     }
 }
