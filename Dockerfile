@@ -7,7 +7,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dev
 WORKDIR /app
 
 # Expose HTTP port
-EXPOSE 5000
+EXPOSE 3030
 
 # Copy solution and project files to enable cached restore layer.
 COPY *.sln ./

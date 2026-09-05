@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="growcery.csproj" />
+  <Project Path="growcery.Tests/growcery.Tests.csproj" />
+</Solution>
