@@ -9,6 +9,9 @@ This is the canonical rules file for every AI agent and developer working in thi
 - Auth is ASP.NET Core Identity with cookies (`/api/account/register`, `/api/account/login`).
 - Tests use xUnit + `WebApplicationFactory` in `growcery.Tests/`.
 - There is no frontend yet.
+- The hosting target is **Azure Container Apps**, running the existing `Dockerfile` image. HTTPS ends at the ingress,
+  so the app receives plain HTTP. Don't propose Azure Functions (rejected: it would mean rewriting the controllers and
+  the auth).
 
 ## 2. Commands
 | Task | Command |

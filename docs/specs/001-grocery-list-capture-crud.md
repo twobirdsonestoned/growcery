@@ -318,6 +318,12 @@ API client should get a status code instead, with a ProblemDetails body (D4). In
 ```csharp
 builder.Services.ConfigureApplicationCookie(options =>
 {
+    // HTTPS ends at the Azure Container Apps ingress (D8), so SameAsRequest wouldn't mark the cookie Secure.
+    if (!builder.Environment.IsDevelopment())
+    {
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    }
+
     options.Events.OnRedirectToLogin = context =>
         WriteProblemAsync(context.HttpContext, StatusCodes.Status401Unauthorized);
     options.Events.OnRedirectToAccessDenied = context =>
@@ -335,6 +341,13 @@ builder.Services.ConfigureApplicationCookie(options =>
 Check that the existing `AccountControllerLoginTests` still pass after this change. Their `401` comes from the
 controller, not from the cookie handler, so it's unaffected.
 
+**Tests and the `Secure` cookie.** Tests run in the `Testing` environment, which isn't Development, so the cookie is
+`Secure` there too. An `HttpClient` won't send a `Secure` cookie over `http://`. So the test helper must create
+clients with an HTTPS base address:
+`_factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") })`.
+Don't weaken the policy for the `Testing` environment. Add a test that the login `Set-Cookie` header contains
+`secure`.
+
 ---
 
 ## 6. Non-functional requirements
@@ -349,9 +362,11 @@ controller, not from the cookie handler, so it's unaffected.
 
   Don't add a CORS policy in this spec. A future frontend spec must revisit CSRF (antiforgery tokens) if it enables
   CORS or cross-site hosting.
-- **Transport.** In production the cookie must be `Secure`. The default `SecurePolicy = SameAsRequest` gives this as
-  long as the app is served over HTTPS (`UseHttpsRedirection` and `UseHsts` are already configured outside
-  Development).
+- **Transport.** In production the cookie must be `Secure`. On Azure Container Apps (D8), HTTPS ends at the ingress
+  and the app receives plain HTTP. The default `SecurePolicy = SameAsRequest` would therefore **not** mark the cookie
+  `Secure`, and `UseHttpsRedirection` could loop. So in §5's `ConfigureApplicationCookie`, set
+  `options.Cookie.SecurePolicy = CookieSecurePolicy.Always` outside Development. Leave Development as it is: the
+  local container serves plain HTTP on port 3030.
 - **Data isolation.** Every query filters by `OwnerId` (§4), and tests prove that another user gets `404` (§9).
 - **No sensitive data in logs** (§6.2).
 
@@ -383,6 +398,16 @@ controller, not from the cookie handler, so it's unaffected.
 - The migration only adds tables (it's additive), so it's safe to apply before the new code is deployed.
 - **Rollback:** `dotnet ef migrations script AddGroceryLists InitialCreate` generates the down script, which drops
   both new tables and **destroys their data**. Only use it before any real data exists.
+- **Hosting target: Azure Container Apps** (D8). The existing `Dockerfile` image is deployed as-is. Nothing in this
+  spec depends on Container Apps beyond the cookie `SecurePolicy` in §6.1.
+- **Hosting prerequisites (outside this spec; must be done before production):**
+  - **Data Protection keys.** Identity cookies are encrypted with ASP.NET Core Data Protection keys, which are stored
+    inside the container by default. Every restart, scale-to-zero or extra replica would log all users out. The keys
+    must be stored somewhere shared and persistent. *Where* they're stored is an open platform decision, not decided
+    here.
+  - **Forwarded headers.** If request scheme or client IP information is needed (e.g. for logging), add
+    `UseForwardedHeaders` configured for the Container Apps ingress.
+  - **The deployment pipeline** (build image, run migration script, deploy revision) doesn't exist yet.
 
 ---
 
@@ -395,7 +420,7 @@ passes. Make one commit per step, and `dotnet test` must pass before each commit
 2. ✅ **Migration** `20260928182713_AddGroceryLists`. It has been reviewed and applied to Postgres (`d49ad91`).
 3. **Test helper + auth behaviour.**
    - Add `growcery.Tests/AuthenticatedClientExtensions.cs`, which registers a unique user and returns a signed-in
-     `HttpClient`.
+     `HttpClient` with base address `https://localhost` (§5, "Tests and the `Secure` cookie").
    - Write the failing test that an unauthenticated `GET /api/lists` returns `401` with `application/problem+json`.
      (The route doesn't exist yet, so first add an empty `[Authorize]` `GroceryListsController` class.)
    - Apply the `Program.cs` change from §5.
@@ -433,6 +458,7 @@ Minimum cases:
 **Auth and format**
 - Unauthenticated `GET /api/lists` returns `401` (not `302`) with a ProblemDetails body.
 - `POST /api/lists` with `Content-Type: application/x-www-form-urlencoded` returns `415`.
+- A successful login's `Set-Cookie` header includes `secure` (D8, §6.1).
 
 **Lists**
 - `POST` with a valid name returns `201`, a `Location` header, and a body with the trimmed name.
@@ -537,6 +563,17 @@ _None. All open questions are resolved._
   - EF InMemory can't enforce unique indexes, so the `DbUpdateException` → `409` mapping has no automated test.
   - It's checked by hand against Postgres (§8 step 7) and tracked in the DoD. Add Testcontainers-based Postgres tests
     in a later spec if more DB-specific behaviour appears.
+- **D8 — Hosting on Azure Container Apps** (decided 2026-09-28).
+  - Azure Functions was considered and rejected. It would mean rewriting the controllers as HTTP-triggered functions
+    and replacing Identity cookie auth.
+  - Container Apps runs the existing Docker image unchanged and can scale to zero. See §6.1 (cookie `SecurePolicy`)
+    and §7 (hosting prerequisites).
+- **D9 — POPIA is deferred** (decided 2026-09-28).
+  - Compliance with South Africa's Protection of Personal Information Act is **out of scope for now**, because lists
+    stay private to each account and aren't shared.
+  - This is a deferral, **not** a compliance sign-off. POPIA applies to storing personal information even when it
+    isn't shared. D2's "keep soft-deleted lists forever" and the lack of account/data deletion should be revisited
+    before a public launch.
 
 ---
 
@@ -547,3 +584,4 @@ _None. All open questions are resolved._
 | 2026-09-28 | Initial spec. |
 | 2026-09-28 | D1–D3 recorded (unique item names, soft-deleted lists, no limits). |
 | 2026-09-28 | Production-readiness review. Fixed: culture-invariant `[Range]` (B1), 2-decimal quantity validation (B2), microsecond timestamps (B3), unified ProblemDetails errors (D4), test-first plan (B5), spec/code drift (B6), removed the manual blank-name check (B7). Added §6 NFRs (security/CSRF, logging, performance), §7 deployment and migrations, D4–D7, and extra tests. |
+| 2026-09-28 | D8 (Azure Container Apps hosting) and D9 (POPIA deferred). Cookie `SecurePolicy = Always` outside Development (§6.1). Hosting prerequisites listed in §7. |
