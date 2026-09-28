@@ -574,6 +574,10 @@ _None. All open questions are resolved._
   - This is a deferral, **not** a compliance sign-off. POPIA applies to storing personal information even when it
     isn't shared. D2's "keep soft-deleted lists forever" and the lack of account/data deletion should be revisited
     before a public launch.
+- **D10 — Data Protection key storage is deferred** (decided 2026-09-28).
+  - Where the cookie-encryption keys are stored (§7, hosting prerequisites) is postponed. It doesn't block this spec.
+  - It **must** be decided and implemented before the first production deployment. Until then, every container
+    restart or scale-to-zero logs all users out.
 
 ---
 
