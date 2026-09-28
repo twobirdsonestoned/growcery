@@ -64,4 +64,25 @@ public class AccountControllerLoginTests : IClassFixture<GrowceryWebApplicationF
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.False(response.Headers.TryGetValues("Set-Cookie", out _), "Did not expect a Set-Cookie header on a failed login response.");
     }
+
+    [Fact]
+    public async Task Login_OutsideDevelopment_SetsSecureAuthCookie()
+    {
+        const string userName = "secure-cookie-user";
+        const string password = "P@ssw0rd123!";
+        await CreateUserAsync(userName, password);
+
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/account/login", new LoginViewModel
+        {
+            UserName = userName,
+            Password = password,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("Set-Cookie", out var cookies), "Expected a Set-Cookie header on a successful login response.");
+        var authCookie = Assert.Single(cookies!, cookie => cookie.StartsWith(".AspNetCore.Identity.Application", StringComparison.Ordinal));
+        Assert.Contains("secure", authCookie, StringComparison.OrdinalIgnoreCase);
+    }
 }
