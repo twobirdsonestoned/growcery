@@ -35,14 +35,21 @@ Match the existing code:
 - **Namespaces:** file-scoped `growcery.Controllers`, `growcery.Models`, `growcery.Data`.
 - **Nullable** is enabled. The build must not add new warnings.
 - **Request models** are classes with DataAnnotations. Reference: `Models/AccountViewModels.cs`.
-- **Response models** are `sealed record`s. Reference: `Models/ApiResponseModels.cs`. Reuse `ErrorResponse` and
-  `ValidationErrorResponse` where they fit.
+- **Response models** are `sealed record`s. Reference: `Models/ApiResponseModels.cs`.
 - **Never return EF entities from endpoints.** Map them to response records.
-- **Validation:** rely on `[ApiController]`'s automatic `400 ValidationProblemDetails`. For checks beyond
-  DataAnnotations, use `ModelState.AddModelError(...)` + `return ValidationProblem();`.
+- **Errors:** new endpoints return **ProblemDetails** (`application/problem+json`) for every non-2xx response
+  (`NotFound()`, `Problem(...)`, automatic `ValidationProblemDetails`). `ErrorResponse`/`ValidationErrorResponse` are
+  legacy, used only by the account endpoints.
+- **Validation:** DataAnnotations only. Write a custom `ValidationAttribute` when the built-in ones don't cover a
+  rule. Don't validate by hand in controllers. `[ApiController]` returns `400 ValidationProblemDetails` automatically.
+- **`[Range]` with `typeof(decimal)`/`typeof(double)`** must set `ParseLimitsInInvariantCulture = true` and
+  `ConvertValueInInvariantCulture = true`. Dev machines use `en-ZA`, where the decimal separator is `,`.
+- **OpenAPI:** every action declares its responses with `[ProducesResponseType]`, success and error codes.
 - **Data access** goes straight through `ApplicationDbContext` in controllers. Don't add repository or service layers
   unless a spec asks for them.
-- **Timestamps:** use `DateTimeOffset.UtcNow` (Npgsql `timestamptz` rejects non-UTC offsets).
+- **Timestamps:** use `Timestamps.UtcNow()` (`Data/Timestamps.cs`, added in spec 001 step 4), which returns UTC truncated to microseconds to
+  match Postgres `timestamptz`. Don't call `DateTimeOffset.UtcNow` directly for persisted values.
+- **Logging:** inject `ILogger<T>`, log writes with structured IDs, and never log user free text (names, notes).
 - Use `async`/`await` for all EF calls (`ToListAsync`, `FirstOrDefaultAsync`, `SaveChangesAsync`).
 
 ## 5. Security rules
