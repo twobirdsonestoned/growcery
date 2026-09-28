@@ -2,7 +2,7 @@
 
 | Field    | Value                                   |
 |----------|-----------------------------------------|
-| Status   | **In progress.** Steps 1–2 done (`d49ad91`). Next: step 3 |
+| Status   | **Implemented and verified.** Steps 1–7 done. Next: step 8 (PR) |
 | Branch   | `feature/grocery-list-capture-crud`     |
 | Scope    | Backend JSON API only (no UI)           |
 | Depends  | Existing Identity + cookie auth (`/api/account/*`) |
@@ -119,8 +119,11 @@ directly in the controllers matches the current size of the app.
 
 All endpoints:
 - Require authentication (`[Authorize]` on the controller).
-- Consume and produce `application/json`. Put `[Consumes("application/json")]` and `[Produces("application/json")]`
-  on each controller. A body with any other content type gets `415` (see §6 for why this matters).
+- Consume and produce `application/json`. Put `[Consumes("application/json")]` on each controller. A body with any
+  other content type gets `415` (see §6 for why this matters).
+- **Don't** add `[Produces("application/json")]`. It overwrites the content type of every object result, so
+  ProblemDetails would be sent as `application/json` instead of `application/problem+json`. JSON is already the
+  default output format.
 - Scope every query to the current user: `OwnerId == _userManager.GetUserId(User)`.
 - Return **`404 Not Found`** (not 403) when a list or item doesn't exist *or* belongs to another user, so the API
   doesn't reveal which IDs exist.
@@ -418,26 +421,28 @@ passes. Make one commit per step, and `dotnet test` must pass before each commit
 
 1. ✅ **Entities + DbContext** (`d49ad91`).
 2. ✅ **Migration** `20260928182713_AddGroceryLists`. It has been reviewed and applied to Postgres (`d49ad91`).
-3. **Test helper + auth behaviour.**
-   - Add `growcery.Tests/AuthenticatedClientExtensions.cs`, which registers a unique user and returns a signed-in
-     `HttpClient` with base address `https://localhost` (§5, "Tests and the `Secure` cookie").
-   - Write the failing test that an unauthenticated `GET /api/lists` returns `401` with `application/problem+json`.
-     (The route doesn't exist yet, so first add an empty `[Authorize]` `GroceryListsController` class.)
-   - Apply the `Program.cs` change from §5.
-4. **Shared building blocks.**
+3. ✅ **Test helper + auth behaviour** (`f087edf`). This was done *after* step 4, because the `401` test needs a real
+   `GET /api/lists`, and that needs step 4's response models.
+   - `growcery.Tests/AuthenticatedClientExtensions.cs` registers a unique user and returns a signed-in `HttpClient`
+     with base address `https://localhost` (§5, "Tests and the `Secure` cookie").
+   - Tests: unauthenticated `GET /api/lists` returns `401` `application/problem+json`, and the login cookie is `Secure`.
+   - The `Program.cs` change from §5, plus `GET /api/lists`.
+4. ✅ **Shared building blocks** (`f3b6623`).
    - `Data/Timestamps.cs` (§3.4).
    - `Models/MaxDecimalPlacesAttribute.cs` (§4.4), with unit tests in
      `growcery.Tests/MaxDecimalPlacesAttributeTests.cs`.
-   - Request and response models (§4.4, §4.5).
-5. **Lists controller.** Build the seven endpoints from §4.2, one at a time, each test-first, including soft delete,
-   deleted lists and restore.
-6. **Items controller.** Build the five endpoints from §4.3, one at a time, each test-first. Check that the parent
-   list belongs to the current user before any item access.
-7. **Manual verification** against Postgres (`docker compose up`, API on `http://localhost:3030`):
+   - Request and response models (§4.4, §4.5), plus `GroceryListMappings` projections.
+5. ✅ **Lists controller** (`c801268`): the seven endpoints from §4.2, test-first.
+6. ✅ **Items controller** (`c753325`): the five endpoints from §4.3, test-first.
+7. ✅ **Manual verification** against Postgres (2026-09-28):
    - All twelve endpoints appear at `/swagger`, with their documented response codes.
-   - D7 race check: send ~10 concurrent `POST`s with the same item name to one list (e.g. parallel `curl`). Expect
-     exactly one `201`, all the others `409`, and **no `500`**.
-   - Apply the migration to a fresh database (`docker compose down -v && docker compose up`).
+   - **D7 race check.** 20 truly concurrent `POST`s with the same name (threads released together by a barrier),
+     repeated 8 rounds. Every round gave exactly one `201` and nineteen `409`s, with **no `500`**. 86 of the 152
+     conflicts got past the app-level check and were caught by the unique index (the `Warning` log in §6.2). That
+     proves the race path. Sequential `curl` from bash on Windows is too slow to create a race; use real concurrency.
+   - **Fresh database.** The idempotent script from §7 applied cleanly to an empty database, and a second run was a
+     safe no-op.
+   - A `POST` response and a later `GET` return identical timestamps from Postgres (B3).
 8. **PR.** Open one PR to `main` with the §10 checklist. Ask before pushing.
 
 ---
@@ -505,17 +510,17 @@ Minimum cases:
 
 ## 10. Definition of done
 
-- [ ] All twelve endpoints are implemented and match §4 exactly (routes, status codes, response shapes).
-- [ ] Every error response is ProblemDetails (§4.1), and every action has `[ProducesResponseType]` attributes.
-- [ ] No endpoint can read or change another user's data (covered by tests).
-- [ ] Unauthenticated requests get `401` ProblemDetails, not a redirect.
-- [ ] The migration is committed and applies cleanly to a fresh PostgreSQL database.
-- [ ] `dotnet build` has no new warnings, and `dotnet test` passes locally and in CI.
-- [ ] The existing account tests still pass.
-- [ ] The endpoints are visible and callable in Swagger UI, with their response codes documented.
-- [ ] The D7 manual race check passed (one `201`, the rest `409`, no `500`).
-- [ ] Writes are logged per §6.2, with no free text in the logs.
-- [ ] Nothing out of scope (§1) was added.
+- [x] All twelve endpoints are implemented and match §4 exactly (routes, status codes, response shapes).
+- [x] Every error response is ProblemDetails (§4.1), and every action has `[ProducesResponseType]` attributes.
+- [x] No endpoint can read or change another user's data (covered by tests).
+- [x] Unauthenticated requests get `401` ProblemDetails, not a redirect.
+- [x] The migration is committed and applies cleanly to a fresh PostgreSQL database.
+- [ ] `dotnet build` has no new warnings, and `dotnet test` passes locally ✅ and **in CI** (pending the PR).
+- [x] The existing account tests still pass.
+- [x] The endpoints are visible and callable in Swagger UI, with their response codes documented.
+- [x] The D7 manual race check passed (one `201`, the rest `409`, no `500`).
+- [x] Writes are logged per §6.2, with no free text in the logs.
+- [x] Nothing out of scope (§1) was added.
 - [ ] **Before production release** (separate change): the `NU1903` vulnerability in `Microsoft.OpenApi` 2.3.0 (pulled
       in by Swashbuckle) is resolved.
 
@@ -589,3 +594,4 @@ _None. All open questions are resolved._
 | 2026-09-28 | D1–D3 recorded (unique item names, soft-deleted lists, no limits). |
 | 2026-09-28 | Production-readiness review. Fixed: culture-invariant `[Range]` (B1), 2-decimal quantity validation (B2), microsecond timestamps (B3), unified ProblemDetails errors (D4), test-first plan (B5), spec/code drift (B6), removed the manual blank-name check (B7). Added §6 NFRs (security/CSRF, logging, performance), §7 deployment and migrations, D4–D7, and extra tests. |
 | 2026-09-28 | D8 (Azure Container Apps hosting) and D9 (POPIA deferred). Cookie `SecurePolicy = Always` outside Development (§6.1). Hosting prerequisites listed in §7. |
+| 2026-09-28 | D10 (Data Protection key storage deferred). Implemented steps 1–7. `[Produces]` dropped from §4 (it breaks the `problem+json` content type). Step 3 done after step 4. Manual verification results recorded in §8. |
