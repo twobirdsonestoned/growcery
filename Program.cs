@@ -31,6 +31,28 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
 
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    // HTTPS ends at the Azure Container Apps ingress, so SameAsRequest wouldn't mark the cookie Secure.
+    if (!builder.Environment.IsDevelopment())
+    {
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    }
+
+    // API clients get a ProblemDetails status code instead of a redirect to a login page.
+    options.Events.OnRedirectToLogin = context =>
+        WriteProblemAsync(context.HttpContext, StatusCodes.Status401Unauthorized);
+    options.Events.OnRedirectToAccessDenied = context =>
+        WriteProblemAsync(context.HttpContext, StatusCodes.Status403Forbidden);
+
+    static Task WriteProblemAsync(HttpContext httpContext, int statusCode)
+    {
+        httpContext.Response.StatusCode = statusCode;
+        var problemDetailsService = httpContext.RequestServices.GetRequiredService<IProblemDetailsService>();
+        return problemDetailsService.WriteAsync(new ProblemDetailsContext { HttpContext = httpContext }).AsTask();
+    }
+});
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
