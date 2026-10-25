@@ -17,6 +17,7 @@ services:
       - DOTNET_USE_POLLING_FILE_WATCHER=1
       - ASPNETCORE_URLS=http://+:3030
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=growcery;Username=growcery;Password=${POSTGRES_PASSWORD:-growcery_dev_pw}
+    working_dir: /app/src/Growcery.Api
     command: ["dotnet", "watch", "run", "--no-launch-profile"]
     stdin_open: true
     tty: true

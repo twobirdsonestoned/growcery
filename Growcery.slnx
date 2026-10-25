@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Growcery.Api/Growcery.Api.csproj" />
+    <Project Path="src/Growcery.Core/Growcery.Core.csproj" />
+    <Project Path="src/Growcery.Data/Growcery.Data.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Growcery.Api.Tests/Growcery.Api.Tests.csproj" />
+  </Folder>
+</Solution>
