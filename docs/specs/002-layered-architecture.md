@@ -141,7 +141,7 @@ erDiagram
         uuid Id PK
         uuid GroceryListId FK
         string Name
-        numeric Quantity "10,3; default 1"
+        numeric Quantity "10,3 - default 1"
         string Unit "Each | Gram | Kilogram | Millilitre | Litre | Pack"
         bool IsPurchased
         timestamptz CreatedAt
