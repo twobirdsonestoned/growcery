@@ -1,4 +1,4 @@
-using Growcery.Data.Entities;
+using Growcery.Core.Domain;
 using Growcery.Data.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -12,48 +12,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     {
     }
 
-    public DbSet<GroceryList> GroceryLists => Set<GroceryList>();
+    public DbSet<Person> People => Set<Person>();
 
-    public DbSet<GroceryListItem> GroceryListItems => Set<GroceryListItem>();
+    public DbSet<GroceryList> GroceryLists => Set<GroceryList>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
 
-        builder.Entity<GroceryList>(list =>
-        {
-            list.Property(l => l.OwnerId).IsRequired();
-            list.Property(l => l.Name).IsRequired().HasMaxLength(100);
-
-            list.HasIndex(l => l.OwnerId);
-            list.HasIndex(l => l.DeletedAt);
-
-            list.HasOne(l => l.Owner)
-                .WithMany()
-                .HasForeignKey(l => l.OwnerId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            list.HasMany(l => l.Items)
-                .WithOne(i => i.GroceryList)
-                .HasForeignKey(i => i.GroceryListId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Soft-deleted lists are hidden from every query unless IgnoreQueryFilters() is used.
-            list.HasQueryFilter(l => l.DeletedAt == null);
-        });
-
-        builder.Entity<GroceryListItem>(item =>
-        {
-            item.Property(i => i.Name).IsRequired().HasMaxLength(100);
-            item.Property(i => i.NormalizedName).IsRequired().HasMaxLength(100);
-            item.Property(i => i.Quantity).HasPrecision(10, 2);
-            item.Property(i => i.Unit).HasMaxLength(20);
-            item.Property(i => i.Notes).HasMaxLength(500);
-
-            item.HasIndex(i => new { i.GroceryListId, i.NormalizedName }).IsUnique();
-
-            // Matches the GroceryList filter so items of a soft-deleted list are hidden too.
-            item.HasQueryFilter(i => i.GroceryList!.DeletedAt == null);
-        });
+        // Domain entities are mapped in Configurations/ so Growcery.Core stays free of persistence attributes.
+        builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
     }
 }

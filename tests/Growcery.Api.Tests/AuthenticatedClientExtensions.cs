@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
 using Growcery.Api.Models;
-using Growcery.Data.Entities;
 using Growcery.Data.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 

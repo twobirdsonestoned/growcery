@@ -1,12 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
-using Growcery.Data;
-using Growcery.Api.Models;
-using Growcery.Data.Entities;
-using Growcery.Data.Identity;
+using Growcery.Api.Contracts;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Growcery.Api.Tests;
 
@@ -21,33 +17,18 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
         _factory = factory;
     }
 
-    private static async Task<GroceryListResponse> CreateListAsync(HttpClient client, string name)
+    private static async Task<GroceryListResponse> CreateListAsync(HttpClient client, string? name)
     {
-        var response = await client.PostAsJsonAsync("/api/lists", new CreateGroceryListRequest { Name = name });
+        var response = await client.PostAsJsonAsync("/api/lists", new { name });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<GroceryListResponse>())!;
+        return await response.Content.ReadJsonAsync<GroceryListResponse>();
     }
 
-    // Item endpoints are covered in GroceryListItemsControllerTests; here items are seeded directly.
-    private async Task AddItemsAsync(Guid listId, params (string Name, bool IsPurchased)[] items)
+    private static async Task<GroceryListItemResponse> AddItemAsync(HttpClient client, Guid listId, string name)
     {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var now = Timestamps.UtcNow();
-        foreach (var (name, isPurchased) in items)
-        {
-            db.GroceryListItems.Add(new GroceryListItem
-            {
-                GroceryListId = listId,
-                Name = name,
-                NormalizedName = name.ToUpperInvariant(),
-                IsPurchased = isPurchased,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
-        }
-
-        await db.SaveChangesAsync();
+        var response = await client.PostAsJsonAsync($"/api/lists/{listId}/items", new { name });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return await response.Content.ReadJsonAsync<GroceryListItemResponse>();
     }
 
     [Fact]
@@ -69,9 +50,7 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
         var response = await client.GetAsync("/api/lists");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var lists = await response.Content.ReadFromJsonAsync<List<GroceryListSummaryResponse>>();
-        Assert.NotNull(lists);
-        Assert.Empty(lists);
+        Assert.Empty(await response.Content.ReadJsonAsync<List<GroceryListSummaryResponse>>());
     }
 
     [Fact]
@@ -79,28 +58,37 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
     {
         var client = await _factory.CreateAuthenticatedClientAsync();
 
-        var response = await client.PostAsJsonAsync("/api/lists", new CreateGroceryListRequest { Name = "  Weekly shop  " });
+        var response = await client.PostAsJsonAsync("/api/lists", new { name = "  Weekly shop  " });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var list = await response.Content.ReadFromJsonAsync<GroceryListResponse>();
-        Assert.NotNull(list);
+        var list = await response.Content.ReadJsonAsync<GroceryListResponse>();
         Assert.Equal("Weekly shop", list.Name);
         Assert.Empty(list.Items);
-        Assert.Null(list.DeletedAt);
         Assert.Equal($"/api/lists/{list.Id}", response.Headers.Location?.AbsolutePath);
     }
 
     [Theory]
+    [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData(null)]
-    public async Task Create_WithBlankName_ReturnsValidationProblem(string? name)
+    public async Task Create_WithoutName_UsesDateBasedDefaultName(string? name)
     {
         var client = await _factory.CreateAuthenticatedClientAsync();
 
-        var response = await client.PostAsJsonAsync("/api/lists", new { name });
+        var list = await CreateListAsync(client, name);
 
-        await AssertValidationProblemAsync(response, "Name");
+        Assert.StartsWith("Shopping list ", list.Name);
+    }
+
+    [Fact]
+    public async Task Create_WithEmptyBody_UsesDefaultName()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        var response = await client.PostAsync("/api/lists", new StringContent("{}", Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.StartsWith("Shopping list ", (await response.Content.ReadJsonAsync<GroceryListResponse>()).Name);
     }
 
     [Fact]
@@ -108,9 +96,9 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
     {
         var client = await _factory.CreateAuthenticatedClientAsync();
 
-        var response = await client.PostAsJsonAsync("/api/lists", new CreateGroceryListRequest { Name = new string('a', 101) });
+        var response = await client.PostAsJsonAsync("/api/lists", new { name = new string('a', 101) });
 
-        await AssertValidationProblemAsync(response, "Name");
+        await AssertValidationProblemAsync(response, "name");
     }
 
     [Fact]
@@ -133,7 +121,7 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
         var response = await client.PostAsJsonAsync("/api/lists", new { id = suppliedId, ownerId = "someone-else", name = "Mine" });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var list = (await response.Content.ReadFromJsonAsync<GroceryListResponse>())!;
+        var list = await response.Content.ReadJsonAsync<GroceryListResponse>();
         Assert.NotEqual(suppliedId, list.Id);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/lists/{list.Id}")).StatusCode);
     }
@@ -156,14 +144,16 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
         var otherClient = await _factory.CreateAuthenticatedClientAsync();
         var list = await CreateListAsync(client, "Mine");
         await CreateListAsync(otherClient, "Theirs");
-        await AddItemsAsync(list.Id, ("Milk", true), ("Bread", false), ("Eggs", true));
+        var milk = await AddItemAsync(client, list.Id, "Milk");
+        await AddItemAsync(client, list.Id, "Bread");
+        await client.PutAsJsonAsync($"/api/lists/{list.Id}/items/{milk.Id}", new { name = "Milk", isPurchased = true });
 
-        var lists = await client.GetFromJsonAsync<List<GroceryListSummaryResponse>>("/api/lists");
+        var lists = await client.GetJsonAsync<List<GroceryListSummaryResponse>>("/api/lists");
 
-        var summary = Assert.Single(lists!);
+        var summary = Assert.Single(lists);
         Assert.Equal(list.Id, summary.Id);
-        Assert.Equal(3, summary.ItemCount);
-        Assert.Equal(2, summary.PurchasedCount);
+        Assert.Equal(2, summary.ItemCount);
+        Assert.Equal(1, summary.PurchasedCount);
     }
 
     [Fact]
@@ -185,9 +175,9 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
         var client = await _factory.CreateAuthenticatedClientAsync();
         var created = await CreateListAsync(client, "Timestamps");
 
-        var fetched = await client.GetFromJsonAsync<GroceryListResponse>($"/api/lists/{created.Id}");
+        var fetched = await client.GetJsonAsync<GroceryListResponse>($"/api/lists/{created.Id}");
 
-        Assert.Equal(created.CreatedAt, fetched!.CreatedAt);
+        Assert.Equal(created.CreatedAt, fetched.CreatedAt);
         Assert.Equal(created.UpdatedAt, fetched.UpdatedAt);
         Assert.Equal(TimeSpan.Zero, created.CreatedAt.Offset);
     }
@@ -198,13 +188,25 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
         var client = await _factory.CreateAuthenticatedClientAsync();
         var created = await CreateListAsync(client, "Old name");
 
-        var response = await client.PutAsJsonAsync($"/api/lists/{created.Id}", new UpdateGroceryListRequest { Name = " New name " });
+        var response = await client.PutAsJsonAsync($"/api/lists/{created.Id}", new { name = " New name " });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var updated = (await response.Content.ReadFromJsonAsync<GroceryListResponse>())!;
+        var updated = await response.Content.ReadJsonAsync<GroceryListResponse>();
         Assert.Equal("New name", updated.Name);
         Assert.True(updated.UpdatedAt > created.UpdatedAt);
         Assert.Equal(created.CreatedAt, updated.CreatedAt);
+    }
+
+    [Fact]
+    public async Task Update_WithBlankName_ResetsToDefaultName()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var created = await CreateListAsync(client, "Named");
+
+        var response = await client.PutAsJsonAsync($"/api/lists/{created.Id}", new { name = "" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.StartsWith("Shopping list ", (await response.Content.ReadJsonAsync<GroceryListResponse>()).Name);
     }
 
     [Fact]
@@ -214,23 +216,24 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
         var intruder = await _factory.CreateAuthenticatedClientAsync();
         var list = await CreateListAsync(owner, "Private");
 
-        var response = await intruder.PutAsJsonAsync($"/api/lists/{list.Id}", new UpdateGroceryListRequest { Name = "Hijacked" });
+        var response = await intruder.PutAsJsonAsync($"/api/lists/{list.Id}", new { name = "Hijacked" });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public async Task Delete_SoftDeletesListAndHidesIt()
+    public async Task Delete_RemovesListAndItsItems()
     {
         var client = await _factory.CreateAuthenticatedClientAsync();
         var list = await CreateListAsync(client, "To delete");
+        var item = await AddItemAsync(client, list.Id, "Milk");
 
         var response = await client.DeleteAsync($"/api/lists/{list.Id}");
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/lists/{list.Id}")).StatusCode);
-        var lists = await client.GetFromJsonAsync<List<GroceryListSummaryResponse>>("/api/lists");
-        Assert.DoesNotContain(lists!, summary => summary.Id == list.Id);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/lists/{list.Id}/items/{item.Id}")).StatusCode);
+        Assert.Empty(await client.GetJsonAsync<List<GroceryListSummaryResponse>>("/api/lists"));
     }
 
     [Fact]
@@ -259,82 +262,20 @@ public class GroceryListsControllerTests : IClassFixture<GrowceryWebApplicationF
     }
 
     [Fact]
-    public async Task Update_OnDeletedList_ReturnsNotFound()
+    public async Task RemovedEndpoints_DeletedAndRestore_NoLongerExist()
     {
         var client = await _factory.CreateAuthenticatedClientAsync();
-        var list = await CreateListAsync(client, "Deleted");
-        await client.DeleteAsync($"/api/lists/{list.Id}");
+        var list = await CreateListAsync(client, "Gone");
 
-        var response = await client.PutAsJsonAsync($"/api/lists/{list.Id}", new UpdateGroceryListRequest { Name = "Revived?" });
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task GetDeleted_ReturnsOnlyCallersDeletedLists()
-    {
-        var client = await _factory.CreateAuthenticatedClientAsync();
-        var otherClient = await _factory.CreateAuthenticatedClientAsync();
-        var deleted = await CreateListAsync(client, "Deleted");
-        await CreateListAsync(client, "Active");
-        var othersDeleted = await CreateListAsync(otherClient, "Theirs");
-        await client.DeleteAsync($"/api/lists/{deleted.Id}");
-        await otherClient.DeleteAsync($"/api/lists/{othersDeleted.Id}");
-
-        var lists = await client.GetFromJsonAsync<List<GroceryListSummaryResponse>>("/api/lists/deleted");
-
-        var summary = Assert.Single(lists!);
-        Assert.Equal(deleted.Id, summary.Id);
-        Assert.NotNull(summary.DeletedAt);
-    }
-
-    [Fact]
-    public async Task Restore_DeletedList_ReturnsListWithItemsUnchanged()
-    {
-        var client = await _factory.CreateAuthenticatedClientAsync();
-        var list = await CreateListAsync(client, "Restore me");
-        await AddItemsAsync(list.Id, ("Milk", true), ("Bread", false));
-        await client.DeleteAsync($"/api/lists/{list.Id}");
-
-        var response = await client.PostAsync($"/api/lists/{list.Id}/restore", null);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var restored = (await response.Content.ReadFromJsonAsync<GroceryListResponse>())!;
-        Assert.Null(restored.DeletedAt);
-        Assert.Equal(["Milk", "Bread"], restored.Items.Select(item => item.Name).Order().Reverse());
-        Assert.Equal(1, restored.Items.Count(item => item.IsPurchased));
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/lists/{list.Id}")).StatusCode);
-    }
-
-    [Fact]
-    public async Task Restore_ActiveList_ReturnsNotFound()
-    {
-        var client = await _factory.CreateAuthenticatedClientAsync();
-        var list = await CreateListAsync(client, "Active");
-
-        var response = await client.PostAsync($"/api/lists/{list.Id}/restore", null);
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Restore_AnotherUsersDeletedList_ReturnsNotFound()
-    {
-        var owner = await _factory.CreateAuthenticatedClientAsync();
-        var intruder = await _factory.CreateAuthenticatedClientAsync();
-        var list = await CreateListAsync(owner, "Private");
-        await owner.DeleteAsync($"/api/lists/{list.Id}");
-
-        var response = await intruder.PostAsync($"/api/lists/{list.Id}/restore", null);
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/lists/deleted")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/lists/{list.Id}/restore", null)).StatusCode);
     }
 
     private static async Task AssertValidationProblemAsync(HttpResponseMessage response, string field)
     {
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(ProblemJson, response.Content.Headers.ContentType?.MediaType);
-        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
-        Assert.Contains(problem!.Errors.Keys, key => key.Equals(field, StringComparison.OrdinalIgnoreCase));
+        var problem = await response.Content.ReadJsonAsync<ValidationProblemDetails>();
+        Assert.Contains(problem.Errors.Keys, key => key.Contains(field, StringComparison.OrdinalIgnoreCase));
     }
 }

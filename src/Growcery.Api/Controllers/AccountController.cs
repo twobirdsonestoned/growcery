@@ -1,5 +1,4 @@
 using Growcery.Api.Models;
-using Growcery.Data.Entities;
 using Growcery.Data.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;

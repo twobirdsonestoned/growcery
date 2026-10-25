@@ -1,12 +1,8 @@
-using Growcery.Data;
-using Growcery.Api.Models;
-using Growcery.Data.Entities;
-using Growcery.Data.Identity;
+using Growcery.Api.Contracts;
+using Growcery.Api.Infrastructure;
+using Growcery.Core.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace Growcery.Api.Controllers;
 
@@ -16,59 +12,31 @@ namespace Growcery.Api.Controllers;
 [Consumes("application/json")]
 public class GroceryListItemsController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
-    private readonly UserManager<ApplicationUser> _userManager;
-    private readonly ILogger<GroceryListItemsController> _logger;
+    private readonly IGroceryListItemService _items;
 
-    public GroceryListItemsController(ApplicationDbContext db, UserManager<ApplicationUser> userManager, ILogger<GroceryListItemsController> logger)
+    public GroceryListItemsController(IGroceryListItemService items)
     {
-        _db = db;
-        _userManager = userManager;
-        _logger = logger;
+        _items = items;
     }
-
-    private string CurrentUserId => _userManager.GetUserId(User)!;
 
     [HttpGet]
     [ProducesResponseType<IEnumerable<GroceryListItemResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<IEnumerable<GroceryListItemResponse>>> GetItems(Guid listId)
+    public async Task<ActionResult<IEnumerable<GroceryListItemResponse>>> GetItems(Guid listId, CancellationToken cancellationToken)
     {
-        var userId = CurrentUserId;
-        if (!await _db.GroceryLists.AnyAsync(list => list.Id == listId && list.OwnerId == userId))
-        {
-            return NotFound();
-        }
-
-        var items = await _db.GroceryListItems
-            .AsNoTracking()
-            .Where(item => item.GroceryListId == listId)
-            .OrderBy(item => item.CreatedAt)
-            .ThenBy(item => item.Id)
-            .Select(GroceryListMappings.ToItemResponse)
-            .ToListAsync();
-
-        return Ok(items);
+        var result = await _items.GetItemsAsync(listId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value.Select(item => item.ToResponse())) : this.ToProblem(result);
     }
 
     [HttpGet("{itemId:guid}")]
     [ProducesResponseType<GroceryListItemResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<GroceryListItemResponse>> GetItem(Guid listId, Guid itemId)
+    public async Task<ActionResult<GroceryListItemResponse>> GetItem(Guid listId, Guid itemId, CancellationToken cancellationToken)
     {
-        var item = await FindItemQuery(listId, itemId)
-            .AsNoTracking()
-            .Select(GroceryListMappings.ToItemResponse)
-            .FirstOrDefaultAsync();
-
-        if (item is null)
-        {
-            return NotFound();
-        }
-
-        return Ok(item);
+        var result = await _items.GetItemAsync(listId, itemId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value.ToResponse()) : this.ToProblem(result);
     }
 
     [HttpPost]
@@ -76,46 +44,13 @@ public class GroceryListItemsController : ControllerBase
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status415UnsupportedMediaType)]
-    public async Task<ActionResult<GroceryListItemResponse>> CreateItem(Guid listId, CreateGroceryListItemRequest request)
+    public async Task<ActionResult<GroceryListItemResponse>> CreateItem(Guid listId, CreateGroceryListItemRequest request, CancellationToken cancellationToken)
     {
-        var userId = CurrentUserId;
-        var list = await _db.GroceryLists.FirstOrDefaultAsync(list => list.Id == listId && list.OwnerId == userId);
-        if (list is null)
-        {
-            return NotFound();
-        }
-
-        var name = request.Name.Trim();
-        var normalizedName = Normalize(name);
-        if (await NameExistsAsync(listId, normalizedName, exceptItemId: null))
-        {
-            return DuplicateName(name);
-        }
-
-        var now = Timestamps.UtcNow();
-        var item = new GroceryListItem
-        {
-            GroceryListId = listId,
-            Name = name,
-            NormalizedName = normalizedName,
-            Quantity = request.Quantity,
-            Unit = TrimToNull(request.Unit),
-            Notes = TrimToNull(request.Notes),
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        _db.GroceryListItems.Add(item);
-        list.UpdatedAt = now;
-
-        if (!await TrySaveAsync(listId))
-        {
-            return DuplicateName(name);
-        }
-
-        _logger.LogInformation("User {UserId} added item {GroceryListItemId} to grocery list {GroceryListId}", userId, item.Id, listId);
-        return CreatedAtAction(nameof(GetItem), new { listId, itemId = item.Id }, item.ToResponse());
+        var result = await _items.AddItemAsync(listId, new ItemInput(request.Name, request.Quantity, request.Unit), cancellationToken);
+        return result.IsSuccess
+            ? CreatedAtAction(nameof(GetItem), new { listId, itemId = result.Value.Id }, result.Value.ToResponse())
+            : this.ToProblem(result);
     }
 
     [HttpPut("{itemId:guid}")]
@@ -123,97 +58,21 @@ public class GroceryListItemsController : ControllerBase
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status415UnsupportedMediaType)]
-    public async Task<ActionResult<GroceryListItemResponse>> UpdateItem(Guid listId, Guid itemId, UpdateGroceryListItemRequest request)
+    public async Task<ActionResult<GroceryListItemResponse>> UpdateItem(Guid listId, Guid itemId, UpdateGroceryListItemRequest request, CancellationToken cancellationToken)
     {
-        var item = await FindItemQuery(listId, itemId).Include(item => item.GroceryList).FirstOrDefaultAsync();
-        if (item is null)
-        {
-            return NotFound();
-        }
-
-        var name = request.Name.Trim();
-        var normalizedName = Normalize(name);
-        if (await NameExistsAsync(listId, normalizedName, exceptItemId: itemId))
-        {
-            return DuplicateName(name);
-        }
-
-        var now = Timestamps.UtcNow();
-        item.Name = name;
-        item.NormalizedName = normalizedName;
-        item.Quantity = request.Quantity;
-        item.Unit = TrimToNull(request.Unit);
-        item.Notes = TrimToNull(request.Notes);
-        item.IsPurchased = request.IsPurchased;
-        item.UpdatedAt = now;
-        item.GroceryList!.UpdatedAt = now;
-
-        if (!await TrySaveAsync(listId))
-        {
-            return DuplicateName(name);
-        }
-
-        _logger.LogInformation("User {UserId} updated item {GroceryListItemId} in grocery list {GroceryListId}", CurrentUserId, item.Id, listId);
-        return Ok(item.ToResponse());
+        var result = await _items.UpdateItemAsync(
+            listId, itemId, new ItemInput(request.Name, request.Quantity, request.Unit), request.IsPurchased, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value.ToResponse()) : this.ToProblem(result);
     }
 
     [HttpDelete("{itemId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteItem(Guid listId, Guid itemId)
+    public async Task<IActionResult> DeleteItem(Guid listId, Guid itemId, CancellationToken cancellationToken)
     {
-        var item = await FindItemQuery(listId, itemId).Include(item => item.GroceryList).FirstOrDefaultAsync();
-        if (item is null)
-        {
-            return NotFound();
-        }
-
-        _db.GroceryListItems.Remove(item);
-        item.GroceryList!.UpdatedAt = Timestamps.UtcNow();
-        await _db.SaveChangesAsync();
-
-        _logger.LogInformation("User {UserId} deleted item {GroceryListItemId} from grocery list {GroceryListId}", CurrentUserId, itemId, listId);
-        return NoContent();
+        var result = await _items.RemoveItemAsync(listId, itemId, cancellationToken);
+        return result.IsSuccess ? NoContent() : this.ToProblem(result);
     }
-
-    // The query filters already hide items of soft-deleted lists; this adds ownership and the list/item pairing.
-    private IQueryable<GroceryListItem> FindItemQuery(Guid listId, Guid itemId)
-    {
-        var userId = CurrentUserId;
-        return _db.GroceryListItems.Where(item =>
-            item.Id == itemId && item.GroceryListId == listId && item.GroceryList!.OwnerId == userId);
-    }
-
-    private Task<bool> NameExistsAsync(Guid listId, string normalizedName, Guid? exceptItemId) =>
-        _db.GroceryListItems.AnyAsync(item =>
-            item.GroceryListId == listId && item.NormalizedName == normalizedName && item.Id != exceptItemId);
-
-    // A concurrent request can pass the NameExistsAsync check first; the unique index then rejects this save.
-    private async Task<bool> TrySaveAsync(Guid listId)
-    {
-        try
-        {
-            await _db.SaveChangesAsync();
-            return true;
-        }
-        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        {
-            _logger.LogWarning("Duplicate item name rejected by the unique index for grocery list {GroceryListId}", listId);
-            return false;
-        }
-    }
-
-    private ObjectResult DuplicateName(string name) =>
-        Problem(
-            statusCode: StatusCodes.Status409Conflict,
-            title: "Duplicate item name",
-            detail: $"An item named '{name}' already exists in this list.");
-
-    private static string Normalize(string name) => name.ToUpperInvariant();
-
-    private static string? TrimToNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

@@ -1,6 +1,8 @@
+using System.Text.Json.Serialization;
+using Growcery.Api.Infrastructure;
+using Growcery.Core;
+using Growcery.Core.Abstractions;
 using Growcery.Data;
-using Growcery.Api.Models;
-using Growcery.Data.Entities;
 using Growcery.Data.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +11,9 @@ using Microsoft.OpenApi;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -23,7 +27,12 @@ builder.Services.AddSwaggerGen(options =>
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(connectionString));
+
+// Composition root: the business layer, the data layer that implements its interfaces, and the current user.
+builder.Services.AddGrowceryCore();
+builder.Services.AddGrowceryData(connectionString);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
 
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
     {

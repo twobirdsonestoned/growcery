@@ -257,9 +257,12 @@ One commit per step, test-first (AGENTS.md §7), and `dotnet test` passes before
 2. **Restructure only:** move the code into the five projects (`git mv`). Update the solution, namespaces,
    `Dockerfile`, `docker-compose.yml` and CI. Behaviour is unchanged, and all existing tests stay green.
 3. **Core:** domain, rules, abstractions and services, driven by `Growcery.Core.Tests`.
-4. **Data:** configurations, repositories, `PostgresClock`, and the `AddGroceryDomain` migration (reviewed).
-5. **Api:** controllers through the services, `HttpCurrentUser` and result mapping. Integration tests updated for §4.
-   Code that's no longer used is removed.
+4. **Data** and 5. **Api**, in **one commit**. As soon as the database maps the domain entities, the old controllers no
+   longer compile, so splitting them would leave a commit with a broken build.
+   - Data: configurations, repositories, `PostgresClock`, and the `AddGroceryDomain` migration (reviewed).
+   - Api: controllers through the services, `HttpCurrentUser` and result mapping.
+   - Integration tests updated for §4. Tests for removed behaviour (duplicate names, soft delete, restore,
+     `MaxDecimalPlacesAttribute`) are deleted under D11/D12/D14. Code that's no longer used is removed.
 6. **README:** purpose, architecture, ERD, class diagram, how to run and test, roadmap, and spec index.
 7. **Verify:**
    - Fresh database, Swagger and a curl smoke test against Postgres.

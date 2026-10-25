@@ -1,11 +1,8 @@
-using Growcery.Data;
-using Growcery.Api.Models;
-using Growcery.Data.Entities;
-using Growcery.Data.Identity;
+using Growcery.Api.Contracts;
+using Growcery.Api.Infrastructure;
+using Growcery.Core.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Growcery.Api.Controllers;
 
@@ -15,72 +12,30 @@ namespace Growcery.Api.Controllers;
 [Consumes("application/json")]
 public class GroceryListsController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
-    private readonly UserManager<ApplicationUser> _userManager;
-    private readonly ILogger<GroceryListsController> _logger;
+    private readonly IGroceryListService _lists;
 
-    public GroceryListsController(ApplicationDbContext db, UserManager<ApplicationUser> userManager, ILogger<GroceryListsController> logger)
+    public GroceryListsController(IGroceryListService lists)
     {
-        _db = db;
-        _userManager = userManager;
-        _logger = logger;
+        _lists = lists;
     }
-
-    private string CurrentUserId => _userManager.GetUserId(User)!;
 
     [HttpGet]
     [ProducesResponseType<IEnumerable<GroceryListSummaryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<IEnumerable<GroceryListSummaryResponse>>> GetLists()
+    public async Task<ActionResult<IEnumerable<GroceryListSummaryResponse>>> GetLists(CancellationToken cancellationToken)
     {
-        var userId = CurrentUserId;
-        var lists = await _db.GroceryLists
-            .AsNoTracking()
-            .Where(list => list.OwnerId == userId)
-            .OrderByDescending(list => list.UpdatedAt)
-            .ThenBy(list => list.Id)
-            .Select(GroceryListMappings.ToSummary)
-            .ToListAsync();
-
-        return Ok(lists);
-    }
-
-    [HttpGet("deleted")]
-    [ProducesResponseType<IEnumerable<GroceryListSummaryResponse>>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<IEnumerable<GroceryListSummaryResponse>>> GetDeletedLists()
-    {
-        var userId = CurrentUserId;
-        var lists = await _db.GroceryLists
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .Where(list => list.OwnerId == userId && list.DeletedAt != null)
-            .OrderByDescending(list => list.DeletedAt)
-            .ThenBy(list => list.Id)
-            .Select(GroceryListMappings.ToSummary)
-            .ToListAsync();
-
-        return Ok(lists);
+        var lists = await _lists.GetListsAsync(cancellationToken);
+        return Ok(lists.Select(list => list.ToResponse()));
     }
 
     [HttpGet("{id:guid}")]
     [ProducesResponseType<GroceryListResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<GroceryListResponse>> GetList(Guid id)
+    public async Task<ActionResult<GroceryListResponse>> GetList(Guid id, CancellationToken cancellationToken)
     {
-        var userId = CurrentUserId;
-        var list = await _db.GroceryLists
-            .AsNoTracking()
-            .Include(list => list.Items)
-            .FirstOrDefaultAsync(list => list.Id == id && list.OwnerId == userId);
-
-        if (list is null)
-        {
-            return NotFound();
-        }
-
-        return Ok(list.ToResponse());
+        var result = await _lists.GetListAsync(id, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value.ToResponse()) : this.ToProblem(result);
     }
 
     [HttpPost]
@@ -88,93 +43,35 @@ public class GroceryListsController : ControllerBase
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status415UnsupportedMediaType)]
-    public async Task<ActionResult<GroceryListResponse>> CreateList(CreateGroceryListRequest request)
+    public async Task<ActionResult<GroceryListResponse>> CreateList(CreateGroceryListRequest request, CancellationToken cancellationToken)
     {
-        var now = Timestamps.UtcNow();
-        var list = new GroceryList
-        {
-            OwnerId = CurrentUserId,
-            Name = request.Name.Trim(),
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-
-        _db.GroceryLists.Add(list);
-        await _db.SaveChangesAsync();
-        _logger.LogInformation("User {UserId} created grocery list {GroceryListId}", list.OwnerId, list.Id);
-
-        return CreatedAtAction(nameof(GetList), new { id = list.Id }, list.ToResponse());
+        var result = await _lists.CreateListAsync(request.Name, cancellationToken);
+        return result.IsSuccess
+            ? CreatedAtAction(nameof(GetList), new { id = result.Value.Id }, result.Value.ToResponse())
+            : this.ToProblem(result);
     }
 
     [HttpPut("{id:guid}")]
     [ProducesResponseType<GroceryListResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status415UnsupportedMediaType)]
-    public async Task<ActionResult<GroceryListResponse>> UpdateList(Guid id, UpdateGroceryListRequest request)
+    public async Task<ActionResult<GroceryListResponse>> UpdateList(Guid id, UpdateGroceryListRequest request, CancellationToken cancellationToken)
     {
-        var userId = CurrentUserId;
-        var list = await _db.GroceryLists
-            .Include(list => list.Items)
-            .FirstOrDefaultAsync(list => list.Id == id && list.OwnerId == userId);
-
-        if (list is null)
-        {
-            return NotFound();
-        }
-
-        list.Name = request.Name.Trim();
-        list.UpdatedAt = Timestamps.UtcNow();
-        await _db.SaveChangesAsync();
-        _logger.LogInformation("User {UserId} updated grocery list {GroceryListId}", userId, list.Id);
-
-        return Ok(list.ToResponse());
+        var result = await _lists.RenameListAsync(id, request.Name, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value.ToResponse()) : this.ToProblem(result);
     }
 
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteList(Guid id)
+    public async Task<IActionResult> DeleteList(Guid id, CancellationToken cancellationToken)
     {
-        var userId = CurrentUserId;
-        var list = await _db.GroceryLists.FirstOrDefaultAsync(list => list.Id == id && list.OwnerId == userId);
-
-        if (list is null)
-        {
-            return NotFound();
-        }
-
-        list.DeletedAt = Timestamps.UtcNow();
-        await _db.SaveChangesAsync();
-        _logger.LogInformation("User {UserId} soft-deleted grocery list {GroceryListId}", userId, list.Id);
-
-        return NoContent();
-    }
-
-    [HttpPost("{id:guid}/restore")]
-    [ProducesResponseType<GroceryListResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<GroceryListResponse>> RestoreList(Guid id)
-    {
-        var userId = CurrentUserId;
-        var list = await _db.GroceryLists
-            .IgnoreQueryFilters()
-            .Include(list => list.Items)
-            .FirstOrDefaultAsync(list => list.Id == id && list.OwnerId == userId && list.DeletedAt != null);
-
-        if (list is null)
-        {
-            return NotFound();
-        }
-
-        list.DeletedAt = null;
-        list.UpdatedAt = Timestamps.UtcNow();
-        await _db.SaveChangesAsync();
-        _logger.LogInformation("User {UserId} restored grocery list {GroceryListId}", userId, list.Id);
-
-        return Ok(list.ToResponse());
+        var result = await _lists.DeleteListAsync(id, cancellationToken);
+        return result.IsSuccess ? NoContent() : this.ToProblem(result);
     }
 }
