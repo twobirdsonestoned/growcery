@@ -80,8 +80,8 @@ case.
     etc.).
   - They check access through `ListMember`. Only the `Owner` may rename or delete a list. Any member may read and
     change items.
-  - They return `Result` / `Result<T>`: `Ok`, `NotFound`, or `Invalid` (errors keyed by field name). There are no
-    HTTP types in Core.
+  - They return `Result` / `Result<T>`: `Ok`, `NotFound`, `Forbidden` (a member who isn't the Owner tries to rename
+    or delete), or `Invalid` (errors keyed by camelCase field name). There are no HTTP types in Core.
 - **Business rules (validation) live in Core, once.** API request models no longer carry validation attributes.
 - `DependencyInjection.AddGrowceryCore(IServiceCollection)` registers the services.
 
@@ -102,6 +102,7 @@ case.
 - `HttpCurrentUser : ICurrentUser` reads `ClaimTypes.NameIdentifier` and `ClaimTypes.Name` from the request.
 - `ResultExtensions.ToActionResult()` maps results to HTTP:
   - `NotFound` → `404` ProblemDetails
+  - `Forbidden` → `403` ProblemDetails (only reachable once sharing adds Editors)
   - `Invalid` → `400` `ValidationProblemDetails`
   - `Ok` → `200`/`201`/`204`
 - Request and response contracts (`Contracts/`). `UnitOfMeasure` is serialized as a string.
