@@ -36,9 +36,11 @@ public sealed class EfGroceryListRepository : IGroceryListRepository
 
     public void Remove(GroceryList list) => _db.GroceryLists.Remove(list);
 
+    // Split query: members and items load in separate SELECTs instead of one joined result of members × items rows.
     private IQueryable<GroceryList> QueryForMember(Guid listId, Guid personId) =>
         _db.GroceryLists
             .Include(list => list.Members)
             .Include(list => list.Items)
+            .AsSplitQuery()
             .Where(list => list.Id == listId && list.Members.Any(member => member.PersonId == personId));
 }

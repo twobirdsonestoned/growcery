@@ -33,5 +33,9 @@ public static class ContractMappings
             list.CreatedAt, list.UpdatedAt);
 
     public static GroceryListItemResponse ToResponse(this GroceryListItem item) =>
-        new(item.Id, item.GroceryListId, item.Name, item.Quantity, item.Unit, item.IsPurchased, item.CreatedAt, item.UpdatedAt);
+        new(item.Id, item.GroceryListId, item.Name, FormatQuantity(item.Quantity), item.Unit, item.IsPurchased, item.CreatedAt, item.UpdatedAt);
+
+    // The database returns quantities with its column scale (2 comes back as 2.000). Removing trailing zeros keeps
+    // a response the same whether the value was just saved or read back.
+    public static decimal FormatQuantity(decimal quantity) => quantity / 1.000000000000000000000000000000000m;
 }

@@ -2,7 +2,7 @@
 
 | Field    | Value                                   |
 |----------|-----------------------------------------|
-| Status   | **In progress** |
+| Status   | **Implemented and verified** (2026-10-25). CI pending on PR #6 |
 | Branch   | `feature/grocery-list-capture-crud` (same PR as spec 001, #6) |
 | Scope    | Restructure into layers + the product changes from the PR #6 review |
 | Depends  | Spec 001 (grocery list capture) |
@@ -268,18 +268,45 @@ One commit per step, test-first (AGENTS.md §7), and `dotnet test` passes before
    - Fresh database, Swagger and a curl smoke test against Postgres.
    - Draft replies to the review comments, and update the PR description.
 
+### 8.1 Verification results (2026-10-25, PostgreSQL 16 in Docker)
+- **Fresh database:** `docker compose down -v && up` applied `InitialCreate` and `AddGroceryDomain` on startup. The
+  idempotent script applied to an empty database and was a safe no-op on a second run.
+- **`InitialCreate` SQL** was byte-identical before and after the project move (same SHA-256).
+- **Swagger** shows the 10 endpoints with their documented response codes, and `UnitOfMeasure` as a string enum.
+- **Smoke test:**
+  - `401` ProblemDetails when signed out
+  - default list name
+  - `0.125 Kilogram` round-trips
+  - duplicate names allowed
+  - unknown unit and 4-decimal quantity give `400`
+  - another person gets `404`
+  - deleting a list removes its items and memberships, while people remain
+- **Person race:** 5 rounds of 20 concurrent first requests from a brand-new user. All returned `200`, and each user
+  got exactly one `Person` row. The unique-index fallback handled 96 conflicts.
+- **Fixed during verification:**
+  - Quantities are formatted without trailing zeros, so a POST response and a later GET match. Postgres returns
+    `numeric(10,3)` values with their scale, e.g. `2.000`.
+  - JSON parse errors no longer leak internal type names or add a misleading `request` error.
+  - Lists load members and items with a split query, avoiding a members × items cartesian result.
+  - `docker-compose.yml` gives the container its own `bin/obj`. Sharing them with the host made host builds fail
+    (Linux package paths) and crashed `dotnet watch`.
+- **Known log noise:** when the Person race fallback triggers, EF Core logs the caught unique violation at error level
+  before the repository recovers. It only happens on a brand-new user's simultaneous first requests. Replacing it with
+  `INSERT … ON CONFLICT DO NOTHING` is a possible follow-up.
+
 ---
 
 ## 9. Definition of done
-- [ ] `Growcery.Core` has no reference to ASP.NET Core or EF Core (no package references, no `using`).
-- [ ] Grocery controllers inject only Core service interfaces.
-- [ ] All 10 endpoints match §4, and access is enforced through membership (covered by tests).
-- [ ] Business rules are covered by `Growcery.Core.Tests` unit tests that don't use a database.
-- [ ] `InitialCreate` SQL is unchanged, and `AddGroceryDomain` applies to a fresh PostgreSQL database.
-- [ ] `docker compose up` works with the new layout. Swagger shows the endpoints.
-- [ ] `dotnet build` has no new warnings, and `dotnet test` passes locally and in CI.
-- [ ] `README.md` explains the purpose and architecture, with the ERD and class diagram.
-- [ ] Spec 001 and AGENTS.md are updated to match.
+- [x] `Growcery.Core` has no reference to ASP.NET Core or EF Core (no package references, no `using`).
+- [x] Grocery controllers inject only Core service interfaces.
+- [x] All 10 endpoints match §4, and access is enforced through membership (covered by tests).
+- [x] Business rules are covered by `Growcery.Core.Tests` unit tests that don't use a database.
+- [x] `InitialCreate` SQL is unchanged, and `AddGroceryDomain` applies to a fresh PostgreSQL database.
+- [x] `docker compose up` works with the new layout. Swagger shows the endpoints.
+- [ ] `dotnet build` has no new warnings, and `dotnet test` passes locally ✅ and **in CI** (pending the PR).
+- [x] `README.md` explains the purpose and architecture, with the ERD and class diagram (rendering on GitHub to be
+      checked after push).
+- [x] Spec 001 and AGENTS.md are updated to match.
 
 ---
 
@@ -288,3 +315,4 @@ One commit per step, test-first (AGENTS.md §7), and `dotnet test` passes before
 | Date | Change |
 |---|---|
 | 2026-10-25 | Initial spec, from the PR #6 review. D11–D17. |
+| 2026-10-25 | Implemented. Added the `Forbidden` result. Steps 4 and 5 combined. Verification results and fixes recorded in §8.1. |

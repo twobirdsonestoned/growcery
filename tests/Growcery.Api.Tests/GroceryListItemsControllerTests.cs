@@ -155,6 +155,9 @@ public class GroceryListItemsControllerTests : IClassFixture<GrowceryWebApplicat
             new StringContent($"{{\"name\":\"Milk\",\"unit\":{unitJson}}}", System.Text.Encoding.UTF8, "application/json"));
 
         await AssertValidationProblemAsync(response, "unit");
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("Growcery.", body);
+        Assert.DoesNotContain("\"request\"", body);
     }
 
     [Fact]
