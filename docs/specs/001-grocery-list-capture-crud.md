@@ -2,7 +2,7 @@
 
 | Field    | Value                                   |
 |----------|-----------------------------------------|
-| Status   | **Implemented and verified.** Steps 1–7 done. Next: step 8 (PR) |
+| Status   | **Implemented, then partly superseded by [spec 002](002-layered-architecture.md)** |
 | Branch   | `feature/grocery-list-capture-crud`     |
 | Scope    | Backend JSON API only (no UI)           |
 | Depends  | Existing Identity + cookie auth (`/api/account/*`) |
@@ -11,6 +11,18 @@
 > **what** to build. AGENTS.md defines **how**. Read this spec fully before writing code, implement in the order
 > given in [Implementation plan](#8-implementation-plan), and don't treat the work as done until every item in
 > [Definition of done](#10-definition-of-done) is met.
+
+> **⚠ Superseded in part by [spec 002](002-layered-architecture.md)** (PR #6 review, 2026-10-25). Where they differ,
+> spec 002 wins:
+> - Duplicate item names are allowed (D11 replaces D1).
+> - Lists are hard-deleted with no restore (D12 replaces D2). The `deleted` and `restore` endpoints are removed.
+> - The list name is optional (D13).
+> - Items have `Quantity` (default 1, up to 3 decimal places) and a standard `Unit`, and no `Notes` (D14).
+> - Users are domain `Person`s with list membership (D15).
+> - The code is split into the Api/Core/Data layers (D16). The file paths and "no service or repository layer" guidance
+>   in this spec no longer apply.
+>
+> The rest of this spec (auth behaviour, ProblemDetails, security, logging, deployment) still holds.
 
 ---
 
@@ -534,7 +546,7 @@ _None. All open questions are resolved._
 
 ### Decisions
 
-- **D1 — Item names are unique within a list** (decided 2026-09-28).
+- **D1 — Item names are unique within a list** (decided 2026-09-28). **Superseded by spec 002 D11: duplicates are allowed.**
   - Names are compared **case-insensitively after trimming**, so "Milk", "milk" and " MILK " are the same item.
   - A duplicate on create, or a rename to a name that already exists, returns **`409 Conflict`** as ProblemDetails
     (D4), with `title` "Duplicate item name" and `detail` "An item named '<name>' already exists in this list."
@@ -542,7 +554,7 @@ _None. All open questions are resolved._
   - The rule is enforced in two places: an app-level check, which is what gives the `409`, and a DB unique index on
     `(GroceryListId, NormalizedName)`, which stops races. EF InMemory doesn't enforce unique indexes, so the tests
     exercise the app-level check. See §3.2, §3.3, §4.3 and §9.
-- **D2 — Lists are soft-deleted** (decided 2026-09-28).
+- **D2 — Lists are soft-deleted** (decided 2026-09-28). **Superseded by spec 002 D12: hard delete, no restore.**
   - `DELETE /api/lists/{id}` sets `DeletedAt` instead of removing the row. The list's items are kept.
   - The caller can view their deleted lists (`GET /api/lists/deleted`) and restore one
     (`POST /api/lists/{id}/restore`).
@@ -595,3 +607,4 @@ _None. All open questions are resolved._
 | 2026-09-28 | Production-readiness review. Fixed: culture-invariant `[Range]` (B1), 2-decimal quantity validation (B2), microsecond timestamps (B3), unified ProblemDetails errors (D4), test-first plan (B5), spec/code drift (B6), removed the manual blank-name check (B7). Added §6 NFRs (security/CSRF, logging, performance), §7 deployment and migrations, D4–D7, and extra tests. |
 | 2026-09-28 | D8 (Azure Container Apps hosting) and D9 (POPIA deferred). Cookie `SecurePolicy = Always` outside Development (§6.1). Hosting prerequisites listed in §7. |
 | 2026-09-28 | D10 (Data Protection key storage deferred). Implemented steps 1–7. `[Produces]` dropped from §4 (it breaks the `problem+json` content type). Step 3 done after step 4. Manual verification results recorded in §8. |
+| 2026-10-25 | PR #6 review: D1 and D2 superseded, and the item fields, list name and architecture changed by [spec 002](002-layered-architecture.md). |
