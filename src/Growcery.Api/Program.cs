@@ -68,9 +68,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 
     static Task WriteProblemAsync(HttpContext httpContext, int statusCode)
     {
-        httpContext.Response.StatusCode = statusCode;
-        var problemDetailsService = httpContext.RequestServices.GetRequiredService<IProblemDetailsService>();
-        return problemDetailsService.WriteAsync(new ProblemDetailsContext { HttpContext = httpContext }).AsTask();
+        return Results.Problem(statusCode: statusCode).ExecuteAsync(httpContext);
     }
 });
 
