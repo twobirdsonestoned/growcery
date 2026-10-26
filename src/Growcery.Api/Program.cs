@@ -76,6 +76,9 @@ var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 app.UseExceptionHandler();
+app.UseStatusCodePages(context =>
+    Results.Problem(statusCode: context.HttpContext.Response.StatusCode)
+        .ExecuteAsync(context.HttpContext));
 
 if (!app.Environment.IsDevelopment())
 {
