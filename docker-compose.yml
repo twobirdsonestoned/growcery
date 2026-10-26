@@ -12,11 +12,20 @@ services:
       - ./:/app:cached      # mount project root into /app in container
       # Optionally mount your local NuGet package cache to speed restores (Linux/macOS):
       - ~/.nuget/packages:/root/.nuget/packages:ro
+      # Give the container its own build output. Sharing bin/obj with the host breaks host builds (Linux package
+      # paths in project.assets.json) and crashes dotnet watch's polling watcher when the host rebuilds.
+      - /app/src/Growcery.Api/bin
+      - /app/src/Growcery.Api/obj
+      - /app/src/Growcery.Core/bin
+      - /app/src/Growcery.Core/obj
+      - /app/src/Growcery.Data/bin
+      - /app/src/Growcery.Data/obj
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - DOTNET_USE_POLLING_FILE_WATCHER=1
       - ASPNETCORE_URLS=http://+:3030
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=growcery;Username=growcery;Password=${POSTGRES_PASSWORD:-growcery_dev_pw}
+    working_dir: /app/src/Growcery.Api
     command: ["dotnet", "watch", "run", "--no-launch-profile"]
     stdin_open: true
     tty: true
