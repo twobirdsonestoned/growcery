@@ -31,6 +31,10 @@ public sealed class ItemDetails
         {
             errors.Add("name", "Name is required.");
         }
+        else if (trimmedName.Contains('\0'))
+        {
+            errors.Add("name", "Name must not contain null characters.");
+        }
         else if (trimmedName.Length > MaxNameLength)
         {
             errors.Add("name", $"Name must be at most {MaxNameLength} characters.");
