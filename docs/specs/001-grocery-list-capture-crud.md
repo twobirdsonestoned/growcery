@@ -407,7 +407,7 @@ Don't weaken the policy for the `Testing` environment. Add a test that the login
 - **Other environments:** startup does **not** migrate. Before deploying, apply the new migration with an idempotent
   script:
   ```
-  dotnet ef migrations script --idempotent --output migrations.sql
+  dotnet ef migrations script --project src/Growcery.Data --startup-project src/Growcery.Api --idempotent --output migrations.sql
   ```
   Then run `migrations.sql` against the target database. Review the script before the first production run.
 - The migration only adds tables (it's additive), so it's safe to apply before the new code is deployed.
