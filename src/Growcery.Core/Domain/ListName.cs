@@ -22,6 +22,13 @@ public static class ListName
             return Result<string>.Invalid(errors.ToDictionary());
         }
 
+        if (trimmed.Contains('\0'))
+        {
+            var errors = new ValidationErrors();
+            errors.Add("name", "Name must not contain null characters.");
+            return Result<string>.Invalid(errors.ToDictionary());
+        }
+
         return Result<string>.Success(trimmed);
     }
 
