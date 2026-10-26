@@ -411,8 +411,8 @@ Don't weaken the policy for the `Testing` environment. Add a test that the login
   ```
   Then run `migrations.sql` against the target database. Review the script before the first production run.
 - The migration only adds tables (it's additive), so it's safe to apply before the new code is deployed.
-- **Rollback:** `dotnet ef migrations script AddGroceryLists InitialCreate` generates the down script, which drops
-  both new tables and **destroys their data**. Only use it before any real data exists.
+- **Rollback:** `dotnet ef migrations script AddGroceryDomain InitialCreate --project src/Growcery.Data --startup-project src/Growcery.Api` generates the down script, which drops
+  the four domain tables and **destroys their data**. Only use it before any real data exists.
 - **Hosting target: Azure Container Apps** (D8). The existing `Dockerfile` image is deployed as-is. Nothing in this
   spec depends on Container Apps beyond the cookie `SecurePolicy` in §6.1.
 - **Hosting prerequisites (outside this spec; must be done before production):**
