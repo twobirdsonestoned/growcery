@@ -2,7 +2,7 @@
 
 | Field    | Value                                   |
 |----------|-----------------------------------------|
-| Status   | **Implemented, then partly superseded by [spec 002](002-layered-architecture.md)** |
+| Status   | **Implemented, then partly superseded by [spec 002](002-layered-architecture.md) and [spec 003](003-auth0-authentication.md)** |
 | Branch   | `feature/grocery-list-capture-crud`     |
 | Scope    | Backend JSON API only (no UI)           |
 | Depends  | Existing Identity + cookie auth (`/api/account/*`) |
@@ -22,7 +22,11 @@
 > - The code is split into the Api/Core/Data layers (D16). The file paths and "no service or repository layer" guidance
 >   in this spec no longer apply.
 >
-> The rest of this spec (auth behaviour, ProblemDetails, security, logging, deployment) still holds.
+> **⚠ Auth superseded by [spec 003](003-auth0-authentication.md)** (D20). ASP.NET Core Identity and cookie auth are
+> replaced by Auth0-issued JWT bearer tokens. That supersedes the §2 Auth row, the cookie events for `401`/`403`, §5,
+> the CSRF and Transport points in §6.1, and the Data Protection prerequisite in §7.
+>
+> The rest of this spec (ProblemDetails, data isolation, logging, deployment) still holds.
 
 ---
 
@@ -326,6 +330,9 @@ Content-Type: application/problem+json
 
 ## 5. Required change: API-friendly auth responses
 
+> **Superseded by [spec 003](003-auth0-authentication.md) (D20).** There is no cookie any more. The `401`
+> ProblemDetails now comes from JWT bearer validation (spec 003 §4.3).
+
 By default, Identity's cookie handler **redirects** unauthenticated requests to `/Account/Login` with a `302`. An
 API client should get a status code instead, with a ProblemDetails body (D4). In `Program.cs`, after
 `AddIdentity(...)`, add:
@@ -368,6 +375,9 @@ Don't weaken the policy for the `Testing` environment. Add a test that the login
 ## 6. Non-functional requirements
 
 ### 6.1 Security
+
+> **CSRF and Transport superseded by [spec 003](003-auth0-authentication.md) §8.** Bearer tokens aren't sent
+> automatically by browsers, and there's no cookie to mark `Secure`.
 - **CSRF.** The state-changing endpoints use cookie auth, so they rely on three layers:
   1. The Identity cookie is `HttpOnly` and `SameSite=Lax` (Identity defaults), so browsers don't send it on
      cross-site POST, PUT or DELETE requests.
@@ -416,7 +426,8 @@ Don't weaken the policy for the `Testing` environment. Add a test that the login
 - **Hosting target: Azure Container Apps** (D8). The existing `Dockerfile` image is deployed as-is. Nothing in this
   spec depends on Container Apps beyond the cookie `SecurePolicy` in §6.1.
 - **Hosting prerequisites (outside this spec; must be done before production):**
-  - **Data Protection keys.** Identity cookies are encrypted with ASP.NET Core Data Protection keys, which are stored
+  - ~~**Data Protection keys.**~~ *No longer needed: superseded by [spec 003](003-auth0-authentication.md) §2.3, since
+    no auth cookie exists.* Identity cookies are encrypted with ASP.NET Core Data Protection keys, which are stored
     inside the container by default. Every restart, scale-to-zero or extra replica would log all users out. The keys
     must be stored somewhere shared and persistent. *Where* they're stored is an open platform decision, not decided
     here.
