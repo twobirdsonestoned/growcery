@@ -46,6 +46,19 @@ OAuth2/OIDC (the Authorization Code + PKCE flow) only happens between the **clie
 Auth0's SDK and hosted login page. The API has no OAuth/OIDC code. It only uses ASP.NET Core's standard JWT bearer
 validation. For now, Swagger UI acts as the client (§4.4). A future frontend spec reuses the same Auth0 application.
 
+### How a user signs up and logs in
+1. The user taps **Log in / Sign up** in the app. The app sends them to Auth0's hosted login page (Universal Login),
+   which can carry Growcery's logo and colours.
+2. On that page they **sign up** (email + password, or e.g. "Continue with Google"), **log in**, or use
+   **Forgot password?**. MFA and email verification apply there too if they're turned on. Growcery builds none of
+   this.
+3. Auth0 sends them back to the app with an **access token** for the Growcery API.
+4. The app calls the API with `Authorization: Bearer <token>`.
+5. On the first call, the API creates the user's `Person` (spec 002 D17).
+
+Until a frontend exists, Swagger's **Authorize** button plays the app's part (§4.4): it opens the same Auth0 page and
+sends the token on every "Try it out" call.
+
 ### In scope
 - JWT bearer validation against an Auth0 tenant, with `401` ProblemDetails for missing or invalid tokens.
 - Removing ASP.NET Core Identity: the code, the packages, the account endpoints and the `AspNet*` tables.
@@ -296,7 +309,16 @@ Continues from spec 002 (D11–D17).
     values differ. A future switch needs a user migration or account linking. That's acceptable while there are no
     real users.
 - **D20 — The API is a resource server only.** There are no account endpoints, no ASP.NET Core Identity, no
-  cookies, and no tokens issued by the API. This supersedes spec 001's cookie auth (§2 Auth row, §5, §6.1, and the §7
+  cookies, and no tokens issued by the API.
+  - **Users sign up, log in and reset passwords only on Auth0's hosted login page** (§1). Confirmed by the user on
+    2026-10-30.
+  - **Rejected:** keeping `/api/account/register` and `/login` as endpoints that forward the username and password to
+    Auth0 (the "password grant"). Three reasons:
+    - Passwords would pass through our API again.
+    - It rules out MFA, social login and Auth0's bot and breached-password protection.
+    - It ties the API to Auth0's login API, so switching provider would mean rewriting it.
+
+  This supersedes spec 001's cookie auth (§2 Auth row, §5, §6.1, and the §7
   Data Protection prerequisite) and spec 002's "`AccountController` keeps using ASP.NET Identity" (§1, §2.3).
 - **D21 — `Person.ExternalId` is the Auth0 `sub` claim.** It's stored as-is (`auth0|…`, `google-oauth2|…`). It's
   unique within a tenant, and each environment has its own database, so the issuer isn't added to the key.
@@ -371,3 +393,4 @@ One commit per step, test-first (AGENTS.md §8), and `dotnet test` passes before
 | Date | Change |
 |---|---|
 | 2026-10-30 | Initial draft. D18–D21, open questions Q1–Q5. |
+| 2026-10-30 | D20: hosted login only, and the password-forwarding endpoints rejected. Added the sign-up and login walkthrough to §1. |
