@@ -15,12 +15,13 @@ compares live prices from retailers. Today's data model is designed with that in
 
 | Feature | Endpoints | Spec |
 |---|---|---|
-| Accounts (register, log in with a cookie) | `POST /api/account/register`, `POST /api/account/login` | — |
+| Sign-up, login, password reset | None in the API: they happen on **Auth0's hosted login page** (see [Authentication](#authentication)) | [003](docs/specs/003-auth0-authentication.md) |
 | Grocery lists: create (name optional), view, rename, delete | `GET/POST /api/lists`, `GET/PUT/DELETE /api/lists/{id}` | [001](docs/specs/001-grocery-list-capture-crud.md), [002](docs/specs/002-layered-architecture.md) |
 | List items: add, view, edit, tick off, remove | `GET/POST /api/lists/{listId}/items`, `GET/PUT/DELETE /api/lists/{listId}/items/{itemId}` | [001](docs/specs/001-grocery-list-capture-crud.md), [002](docs/specs/002-layered-architecture.md) |
 
 **Key behaviour:**
-- Every list endpoint requires login. Signing in creates the caller's `Person` automatically.
+- Every list endpoint requires an Auth0 access token (`Authorization: Bearer …`). A user's first call creates their
+  `Person` automatically.
 - Access to a list is through **membership**. A list you're not a member of returns `404`.
 - A blank list name becomes `Shopping list 25 Oct 2026` (the creation date).
 - Items default to quantity `1` and unit `Each`. The units are `Each`, `Gram`, `Kilogram`, `Millilitre`, `Litre` and
@@ -37,11 +38,12 @@ nothing about ASP.NET, EF Core or PostgreSQL (Inversion of Control).
 
 ```mermaid
 flowchart TB
-    client([HTTP client]) --> api
+    client([HTTP client]) -- Bearer token --> api
+    client -. logs in .-> auth0([Auth0])
 
     subgraph api [Growcery.Api — Presentation]
         controllers[Controllers + HTTP contracts]
-        auth[ASP.NET Identity cookie auth]
+        auth[JWT bearer validation]
         currentUser[HttpCurrentUser]
         root[Program.cs — DI composition root]
     end
@@ -64,13 +66,14 @@ flowchart TB
     repos -. implements .-> interfaces
     repos --> db
     root -. wires up .-> repos
+    auth -. signing keys .-> auth0
 ```
 
 | Project | Layer | Responsibility | May depend on |
 |---|---|---|---|
 | [`src/Growcery.Api`](src/Growcery.Api) | Presentation | Routes, HTTP contracts, auth, translating results to status codes | Core, Data (for DI wiring only) |
 | [`src/Growcery.Core`](src/Growcery.Core) | Business | Domain entities, validation rules, services, and the interfaces other layers implement | Nothing technical (only `Microsoft.Extensions.*.Abstractions`) |
-| [`src/Growcery.Data`](src/Growcery.Data) | Data | EF Core mappings, repositories, migrations, Identity tables | Core |
+| [`src/Growcery.Data`](src/Growcery.Data) | Data | EF Core mappings, repositories, migrations | Core |
 | [`tests/Growcery.Core.Tests`](tests/Growcery.Core.Tests) | — | Fast unit tests of the business rules, using in-memory fakes | Core |
 | [`tests/Growcery.Api.Tests`](tests/Growcery.Api.Tests) | — | Integration tests through HTTP | Api |
 
@@ -195,6 +198,72 @@ the diagram readable.
 
 ---
 
+## Authentication
+
+Identity is handled entirely by **[Auth0](https://auth0.com)** ([spec 003](docs/specs/003-auth0-authentication.md)).
+Users sign up, log in, reset passwords and use MFA or Google login on **Auth0's hosted login page**. The API is a
+*resource server* only. It never sees passwords, issues no tokens and sets no cookies. It only checks that each
+request carries a valid **access token** that Auth0 issued for this API.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as Client (Swagger UI today, web app later)
+    participant A as Auth0 (hosted login)
+    participant API as Growcery.Api
+    participant DB as PostgreSQL
+
+    U->>C: Log in / Sign up
+    C->>A: Redirect to login page (Authorization Code + PKCE)
+    U->>A: Email + password (or Google), MFA if enabled
+    A-->>C: Access token (JWT, RS256, 1 hour)
+    C->>API: GET /api/lists + Authorization: Bearer {token}
+    API->>API: Validate signature (Auth0's public keys), issuer, audience, expiry
+    alt token missing or invalid
+        API-->>C: 401 ProblemDetails + WWW-Authenticate: Bearer
+    else valid
+        API->>DB: Find or create Person by token "sub" (e.g. auth0|6721…)
+        API-->>C: 200 JSON
+    end
+```
+
+- **Who's calling:** `HttpCurrentUser` reads the token's `sub` claim (the Auth0 user ID) as `Person.ExternalId`. It
+  reads the display name from the custom `https://growcery.app/name` claim, falling back to `sub`.
+- **Configuration** (not secrets): `Auth0:Domain`, `Auth0:Audience` and, for Swagger, `Auth0:SwaggerClientId`. The
+  app refuses to start if the domain or audience is missing.
+- **Tests never call Auth0.** They sign their own tokens with a test key (`TestTokens`).
+
+### Auth0 setup (once per tenant)
+
+There's one tenant per environment: **dev** now, **prod** when hosting is decided. In the
+[Auth0 dashboard](https://manage.auth0.com):
+
+1. **Create a tenant** on the Free plan (e.g. `growcery-dev`, EU region).
+2. **Applications → APIs → Create API:** name `Growcery API`, identifier **`https://api.growcery.local`** (the
+   audience in `appsettings.json`; it doesn't need to resolve), signing algorithm **RS256**. Then, in its
+   **Settings**, set **Maximum Access Token Lifetime** to **3600** seconds.
+3. **Applications → Create Application → Single Page Application**, named `Growcery Swagger`. In **Settings**:
+   - Allowed Callback URLs: `http://localhost:3030/swagger/oauth2-redirect.html, https://localhost:7220/swagger/oauth2-redirect.html`
+   - Allowed Web Origins: `http://localhost:3030, https://localhost:7220`
+4. **Authentication → Database:** make sure `Username-Password-Authentication` is enabled for the SPA. Social
+   connections (e.g. Google) are optional.
+5. **Actions → Library → Build Custom** (trigger *Login / Post Login*), then deploy and add it to the **Post Login**
+   flow:
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     api.accessToken.setCustomClaim("https://growcery.app/name", event.user.name);
+   };
+   ```
+6. **Fill in `src/Growcery.Api/appsettings.Development.json`:**
+   ```json
+   "Auth0": { "Domain": "growcery-dev.eu.auth0.com", "SwaggerClientId": "<SPA Client ID>" }
+   ```
+   These are identifiers, not secrets. Never commit a client **secret** or a Management API token.
+7. **Check the network:** `https://<your-domain>/.well-known/openid-configuration` should open in a browser. If a
+   corporate proxy blocks it, the API can't download Auth0's signing keys.
+
+---
+
 ## Data model (ERD)
 
 ```mermaid
@@ -202,11 +271,10 @@ erDiagram
     Person ||--o{ ListMember : "is member via"
     GroceryList ||--o{ ListMember : "has"
     GroceryList ||--o{ GroceryListItem : "contains"
-    AspNetUsers ||..o| Person : "ExternalId (no FK)"
 
     Person {
         uuid Id PK
-        string ExternalId UK "login identity, e.g. AspNetUsers.Id"
+        string ExternalId UK "Auth0 user ID (token sub), e.g. auth0|6721…"
         string DisplayName
         timestamptz CreatedAt
     }
@@ -232,21 +300,14 @@ erDiagram
         timestamptz CreatedAt
         timestamptz UpdatedAt
     }
-    AspNetUsers {
-        string Id PK
-        string UserName
-        string PasswordHash
-    }
 ```
 
-- **People and logins are separate.** `Person` is the business's view of a user. `AspNetUsers` belongs to ASP.NET
-  Identity and is linked only through `Person.ExternalId`, with **no foreign key**. A different identity provider
-  (e.g. Entra ID) could replace Identity without changing the domain tables.
+- **People and logins are separate.** `Person` is the business's view of a user. Logins live in Auth0, linked only
+  through `Person.ExternalId` (the token's `sub`). The database holds no user or password tables.
 - **Membership controls access.** The person who creates a list becomes its `Owner`. The `Editor` role is reserved for
   list sharing, which isn't built yet.
 - **Deletes are the same in the app and the database.** Deleting a list cascades to its items and memberships. A
   `Person` is never deleted by the app, so the database restricts it.
-- The other Identity tables (`AspNetRoles`, `AspNetUserClaims`, …) are standard ASP.NET Identity and aren't shown.
 
 ---
 
@@ -255,6 +316,10 @@ erDiagram
 You need:
 - the [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Docker Desktop, running
+- an Auth0 dev tenant, set up as in [Auth0 setup](#auth0-setup-once-per-tenant). The API won't start without it.
+
+> **Upgrading from the cookie-auth version?** Reset your local database once with `docker compose down -v`. The old
+> `Person` rows point to the removed `AspNetUsers` table (spec 003 D23).
 
 | Task | Command |
 |---|---|
@@ -267,16 +332,18 @@ In Development, migrations are applied automatically on startup. Other environme
 script (see [spec 001 §7](docs/specs/001-grocery-list-capture-crud.md#7-deployment-and-migrations)).
 
 **Trying it in Swagger:**
-1. `POST /api/account/register` with a username and password (e.g. `P@ssw0rd123!`). The login cookie is stored in your
-   browser.
+1. Click **Authorize**, then **Authorize** in the `auth0` dialog. Auth0's login page opens. Sign up (first time) or
+   log in. You're sent back to Swagger with an access token, which it now sends on every call.
 2. `POST /api/lists` with `{}` to create a list with the default name.
 3. `POST /api/lists/{id}/items` with `{ "name": "Milk", "quantity": 2, "unit": "Litre" }`.
+
+After an hour the token expires and calls return `401`. Click **Authorize** again to get a new one.
 
 > **Windows tip:** if a local PostgreSQL install is also listening on port 5432, `localhost:5432` reaches it instead of
 > the Docker database. Running everything through `docker compose` avoids this.
 
-**Hosting target:** Azure Container Apps, using the same Docker image. HTTPS ends at the ingress, so outside
-Development the login cookie is always `Secure`.
+**Hosting target:** Azure Container Apps, using the same Docker image. HTTPS ends at the ingress. Production will use
+its own Auth0 tenant, configured through `Auth0__Domain`.
 
 ---
 
@@ -285,7 +352,9 @@ Development the login cookie is always `Secure`.
 - **`Growcery.Core.Tests`** tests the business rules directly, with hand-written in-memory fakes of the repository,
   clock and current-user interfaces. These tests need no database and no web server, and run in about 0.1 s.
 - **`Growcery.Api.Tests`** sends real HTTP requests to the app (`WebApplicationFactory`, with EF InMemory in place of
-  PostgreSQL). It covers routes, status codes, auth, and that one person can't see another person's lists.
+  PostgreSQL). It covers routes, status codes, token validation (expired, wrong audience or issuer, bad signature,
+  unsigned), and that one person can't see another person's lists. Tokens are signed with a test key, so no Auth0
+  account or network access is needed.
 - Work is test-first. See [`AGENTS.md` §8](AGENTS.md#8-testing-rules-test-first).
 
 ---
@@ -294,8 +363,9 @@ Development the login cookie is always `Secure`.
 
 | Spec | What | Status |
 |---|---|---|
-| [001 — Grocery list capture](docs/specs/001-grocery-list-capture-crud.md) | First CRUD API, auth behaviour, error format, security, deployment notes | Implemented, partly superseded by 002 |
-| [002 — Layered architecture](docs/specs/002-layered-architecture.md) | Api/Core/Data split, `Person` + membership, review-driven product changes | Implemented |
+| [001 — Grocery list capture](docs/specs/001-grocery-list-capture-crud.md) | First CRUD API, error format, security, deployment notes | Implemented, partly superseded by 002 and 003 |
+| [002 — Layered architecture](docs/specs/002-layered-architecture.md) | Api/Core/Data split, `Person` + membership, review-driven product changes | Implemented (auth parts superseded by 003) |
+| [003 — Auth0 authentication](docs/specs/003-auth0-authentication.md) | Identity moved to Auth0. The API validates JWT access tokens, and ASP.NET Identity is removed | In progress |
 
 ---
 
@@ -309,6 +379,6 @@ These are designed for, but not built yet (spec 002 §7):
 
 **Known gaps before production:**
 - the `NU1903` vulnerability in a Swagger dependency
-- Data Protection key storage for the login cookie (spec 001 D10)
+- a production Auth0 tenant (spec 003 D24)
 - a deployment pipeline
 - screen mockups for a future frontend
