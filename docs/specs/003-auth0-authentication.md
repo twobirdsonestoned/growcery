@@ -2,7 +2,7 @@
 
 | Field    | Value                                   |
 |----------|-----------------------------------------|
-| Status   | **In progress.** All §10 questions answered (D22–D26) |
+| Status   | **Implemented and verified** (2026-10-31). CI pending on the PR |
 | Branch   | `feature/auth0-authentication`          |
 | Scope    | Replace ASP.NET Core Identity + cookie auth with Auth0-issued JWT access tokens |
 | Depends  | Spec 002 (layered architecture, `Person` + `ICurrentUser`) |
@@ -407,18 +407,46 @@ One commit per step, test-first (AGENTS.md §8), and `dotnet test` passes before
    - A second Auth0 user gets `404` on the first user's list.
    - `curl` with no token, a garbage token, or an ID token → `401` ProblemDetails.
 
+### 11.1 Verification results (2026-10-31, Auth0 EU dev tenant + PostgreSQL 16 in Docker)
+- **Fresh database** (`docker compose down -v && up`): `InitialCreate`, `AddGroceryDomain` and `RemoveAspNetIdentity`
+  were applied on startup. Only `People`, `GroceryLists`, `ListMembers`, `GroceryListItems` and
+  `__EFMigrationsHistory` exist, with no `AspNet*` tables.
+- **Swagger login:** Authorize → Auth0 hosted page → sign-up → back to Swagger with a token. `POST /api/lists` returned
+  `201`, and `GET /api/lists` returned the list.
+- **Person mapping:** one `People` row with `ExternalId = auth0|6ae5…` (D21). It's the list's `Owner`.
+  - `DisplayName` came from the namespaced claim (D22). For an email/password user, Auth0's `name` is the **email
+    address**, so the display name is personal data. It's never logged (AGENTS.md §5).
+- **Rejected tokens** (curl against the running API):
+
+  | Token | Response |
+  |---|---|
+  | none | `401` ProblemDetails, `WWW-Authenticate: Bearer` |
+  | `Bearer garbage` | `401`, `error="invalid_token"` |
+  | an `alg: none` token | `401`, "The signature is invalid" |
+
+  - `POST /api/account/login` → `404`.
+- **Network:** the container reached the tenant's JWKS endpoint (`200`).
+- **Second-user isolation** wasn't repeated manually. It's covered by `GetList_WithAnotherUsersToken_ReturnsNotFound`
+  and the existing grocery `404` tests.
+- **Found during setup and fixed in §6/README:**
+  - both token-lifetime fields must be set
+  - new tenants require the SPA to be authorized under the API's **User Access**
+  - Swagger's `client_secret` box stays empty
+  - dashboard saves can fail in a browser profile with extensions (incognito works)
+
 ---
 
 ## 12. Definition of done
-- [ ] Every open question in §10 is answered and recorded in §9.
-- [ ] No reference to `Microsoft.AspNetCore.Identity` remains in `src/`, and no `AspNet*` tables exist after migrating
+- [x] Every open question in §10 is answered and recorded in §9.
+- [x] No reference to `Microsoft.AspNetCore.Identity` remains in `src/`, and no `AspNet*` tables exist after migrating
       a fresh database.
-- [ ] The grocery endpoints accept only valid Auth0 access tokens for the Growcery API audience. All the §4.3 cases
+- [x] The grocery endpoints accept only valid Auth0 access tokens for the Growcery API audience. All the §4.3 cases
       return `401` ProblemDetails (covered by §7.2).
-- [ ] The grocery integration tests pass unchanged apart from the auth helper. The Core tests are untouched.
-- [ ] Swagger UI can log in through the dev tenant and call the endpoints (if §10 Q4 keeps it).
-- [ ] The README documents the auth flow and the Auth0 setup. Specs 001/002 and AGENTS.md point to this spec.
-- [ ] AGENTS.md §10 holds: no new warnings, `dotnet test` green locally and in CI, migrations reviewed.
+- [x] The grocery integration tests pass unchanged apart from the auth helper. The Core tests are untouched.
+- [x] Swagger UI can log in through the dev tenant and call the endpoints (if §10 Q4 keeps it).
+- [x] The README documents the auth flow and the Auth0 setup. Specs 001/002 and AGENTS.md point to this spec.
+- [ ] AGENTS.md §10 holds: no new warnings ✅, `dotnet test` green locally ✅ and **in CI** (pending the PR), migrations
+      reviewed ✅.
 
 ---
 
@@ -429,5 +457,6 @@ One commit per step, test-first (AGENTS.md §8), and `dotnet test` passes before
 | 2026-10-30 | Initial draft. D18–D21, open questions Q1–Q5. |
 | 2026-10-30 | D20: hosted login only, and the password-forwarding endpoints rejected. Added the sign-up and login walkthrough to §1. |
 | 2026-10-31 | Q1 → D22 and Q2 → D23. Steps 2 and 3 were done as one commit: the test setup configures `JwtBearerOptions`, which only exists once step 3 registers it, and every commit must pass `dotnet test` (AGENTS.md §8). The tests were still written first and seen failing. Data now pins `Microsoft.EntityFrameworkCore.Relational` 10.0.10, because the removed Identity package used to bring it in, and without it the build has a new version-conflict warning. |
+| 2026-10-31 | Verified against the Auth0 dev tenant and PostgreSQL (§11.1). DoD ticked, except CI. |
 | 2026-10-31 | §6 corrected from the real dev tenant setup: both token lifetime fields, the API's User Access authorization for the SPA, and the empty `client_secret`. The dev tenant settings are now in `appsettings.Development.json` (D24). |
 | 2026-10-31 | Q3–Q5 → D24–D26. Step 4: Swagger PKCE login, and the Auth0 settings in `appsettings*.json` only, not in compose or `.env` (§2.3). Added `SwaggerTests`. |

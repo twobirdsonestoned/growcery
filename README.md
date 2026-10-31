@@ -376,7 +376,7 @@ its own Auth0 tenant, configured through `Auth0__Domain`.
 |---|---|---|
 | [001 — Grocery list capture](docs/specs/001-grocery-list-capture-crud.md) | First CRUD API, error format, security, deployment notes | Implemented, partly superseded by 002 and 003 |
 | [002 — Layered architecture](docs/specs/002-layered-architecture.md) | Api/Core/Data split, `Person` + membership, review-driven product changes | Implemented (auth parts superseded by 003) |
-| [003 — Auth0 authentication](docs/specs/003-auth0-authentication.md) | Identity moved to Auth0. The API validates JWT access tokens, and ASP.NET Identity is removed | In progress |
+| [003 — Auth0 authentication](docs/specs/003-auth0-authentication.md) | Identity moved to Auth0. The API validates JWT access tokens, and ASP.NET Identity is removed | Implemented |
 
 ---
 
