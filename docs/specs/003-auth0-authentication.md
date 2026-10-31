@@ -2,7 +2,7 @@
 
 | Field    | Value                                   |
 |----------|-----------------------------------------|
-| Status   | **Draft: open questions in §10 must be answered before implementation** |
+| Status   | **In progress.** All §10 questions answered (D22–D26) |
 | Branch   | `feature/auth0-authentication`          |
 | Scope    | Replace ASP.NET Core Identity + cookie auth with Auth0-issued JWT access tokens |
 | Depends  | Spec 002 (layered architecture, `Person` + `ICurrentUser`) |
@@ -128,9 +128,13 @@ Neither value is a secret. Both identify **which** tenant and API to trust, and 
 
 | Setting | Env var | Example | Where |
 |---|---|---|---|
-| `Auth0:Domain` | `Auth0__Domain` | `growcery-dev.eu.auth0.com` | `appsettings.Development.json` (dev tenant), `docker-compose.yml`, `.env.example` |
-| `Auth0:Audience` | `Auth0__Audience` | `https://api.growcery.local` | same |
-| `Auth0:SwaggerClientId` | `Auth0__SwaggerClientId` | the SPA application's Client ID | same (Development only) |
+| `Auth0:Domain` | `Auth0__Domain` | `growcery-dev.eu.auth0.com` | `appsettings.Development.json` (the dev tenant, D24). Other environments: env var |
+| `Auth0:Audience` | `Auth0__Audience` | `https://api.growcery.local` | `appsettings.json`. The same identifier is used in every tenant |
+| `Auth0:SwaggerClientId` | `Auth0__SwaggerClientId` | the SPA application's Client ID | `appsettings.Development.json` (Development only, D25) |
+
+`docker compose` mounts the repo and runs in Development, so it reads the same `appsettings.Development.json` as
+Visual Studio. The settings therefore live in one place, not in `docker-compose.yml` or `.env`. An empty compose
+env var would also silently override the file.
 
 **No signing key or Data Protection keys need managing.** This supersedes spec 001 §7's Data Protection prerequisite,
 because no auth cookie is encrypted any more.
@@ -218,11 +222,12 @@ the domain, audience and client ID (§2.3).
    - Identifier = the audience (e.g. `https://api.growcery.local`). It's a name, not a URL that has to resolve, and it
      can't be changed later.
    - Signing algorithm **RS256**.
+   - Under the API's **Settings**, set **Maximum Access Token Lifetime** to **3600** seconds (1 hour, D26).
 3. **Applications → Create Application → Single Page Application** (`Growcery Swagger`; a future web app can reuse it or
    get its own):
-   - Allowed Callback URLs: `http://localhost:3030/swagger/oauth2-redirect.html`, plus the Visual Studio HTTPS
-     profile's `https://localhost:<port>/swagger/oauth2-redirect.html`.
-   - Allowed Web Origins: `http://localhost:3030` and `https://localhost:<port>`.
+   - Allowed Callback URLs: `http://localhost:3030/swagger/oauth2-redirect.html, https://localhost:7220/swagger/oauth2-redirect.html`
+     (Docker / the VS `http` profile, and the VS `https` profile).
+   - Allowed Web Origins: `http://localhost:3030, https://localhost:7220`.
    - Copy its **Client ID** into `Auth0:SwaggerClientId`.
 4. **Authentication → Database:** keep `Username-Password-Authentication` enabled for the SPA. Social connections
    (e.g. Google) are optional.
@@ -268,6 +273,10 @@ Each test checks the status, the ProblemDetails body and, where relevant, the `W
 | `FirstCall_WithNameClaim_CreatesPersonWithThatDisplayName` | The `Person` gets the name claim's value (D22) |
 | `FirstCall_WithoutNameClaim_UsesSubjectAsDisplayName` | The `Person` gets `sub` as its display name (D22) |
 | `AccountEndpoints_AreRemoved_ReturnNotFound` | `POST /api/account/login` and `/register` return `404` |
+
+`SwaggerTests` check that the generated OpenAPI document declares the `auth0` Authorization Code flow, with the
+tenant's `/authorize` and `/oauth/token` URLs, and that it requires that scheme globally (D25). They read the
+document from `ISwaggerProvider`, because the Swagger UI middleware only runs in Development.
 
 ### 7.3 Removed tests
 `AccountControllerLoginTests.cs` (3 tests: the Identity cookie on login, no cookie on failure, the `Secure` cookie flag)
@@ -331,6 +340,15 @@ Continues from spec 002 (D11–D17).
 - **D23 — Local dev databases are reset once** (answers Q2, 2026-10-31). Run `docker compose down -v` after pulling
   this change. The old `Person` rows hold `AspNetUsers` IDs that no Auth0 user will ever match, and only test data
   exists.
+- **D24 — One Auth0 tenant per environment** (answers Q3, 2026-10-31).
+  - A **dev** tenant now, whose domain goes in `appsettings.Development.json`.
+  - A separate **prod** tenant when hosting is decided, configured through `Auth0__Domain`.
+  - Both use the same API identifier (audience). A tenant's users and `sub`s are its own, which matches each
+    environment having its own database (D21).
+- **D25 — Swagger UI logs in through Auth0** (answers Q4, 2026-10-31). It uses Authorization Code + PKCE with the
+  dev tenant's SPA application, with no client secret (§4.4). Swagger stays Development-only.
+- **D26 — The access token lifetime is 1 hour** (answers Q5, 2026-10-31). It's set in the Auth0 dashboard per tenant
+  (§6 step 2), not in code. The API can't revoke tokens, so a shorter lifetime limits how long a stolen token works.
 
 ---
 
@@ -346,11 +364,11 @@ To be answered by the user before implementation, then moved into §9 as decisio
      profile` scopes.
 2. ✅ *Answered: reset → D23.* **Existing dev data:** reset local databases once (`docker compose down -v`), so the old `Person` rows tied to
    Identity IDs disappear? Or keep them as orphans?
-3. **Tenants:** one Auth0 **dev** tenant now, and a separate **prod** tenant when hosting is decided? Or one tenant for
+3. ✅ *Answered: separate tenants → D24.* **Tenants:** one Auth0 **dev** tenant now, and a separate **prod** tenant when hosting is decided? Or one tenant for
    everything?
-4. **Swagger login:** Authorization Code + PKCE through Auth0 in Swagger UI (§4.4)? Or skip it and paste a token
+4. ✅ *Answered: PKCE login → D25.* **Swagger login:** Authorization Code + PKCE through Auth0 in Swagger UI (§4.4)? Or skip it and paste a token
    obtained elsewhere (e.g. a small script, or the Auth0 dashboard)?
-5. **Access token lifetime** for the Growcery API in Auth0: keep Auth0's default of 24 hours, or shorten it (e.g. 1
+5. ✅ *Answered: 1 hour → D26.* **Access token lifetime** for the Growcery API in Auth0: keep Auth0's default of 24 hours, or shorten it (e.g. 1
    hour) now that tokens can't be revoked by the API?
 
 ---
@@ -405,3 +423,4 @@ One commit per step, test-first (AGENTS.md §8), and `dotnet test` passes before
 | 2026-10-30 | Initial draft. D18–D21, open questions Q1–Q5. |
 | 2026-10-30 | D20: hosted login only, and the password-forwarding endpoints rejected. Added the sign-up and login walkthrough to §1. |
 | 2026-10-31 | Q1 → D22 and Q2 → D23. Steps 2 and 3 were done as one commit: the test setup configures `JwtBearerOptions`, which only exists once step 3 registers it, and every commit must pass `dotnet test` (AGENTS.md §8). The tests were still written first and seen failing. Data now pins `Microsoft.EntityFrameworkCore.Relational` 10.0.10, because the removed Identity package used to bring it in, and without it the build has a new version-conflict warning. |
+| 2026-10-31 | Q3–Q5 → D24–D26. Step 4: Swagger PKCE login, and the Auth0 settings in `appsettings*.json` only, not in compose or `.env` (§2.3). Added `SwaggerTests`. |

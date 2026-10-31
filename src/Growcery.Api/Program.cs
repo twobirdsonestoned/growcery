@@ -25,6 +25,15 @@ builder.Services.AddControllers(options =>
         options.AllowInputFormatterExceptionMessages = false;
     });
 builder.Services.AddProblemDetails();
+
+// Identity lives in Auth0 (spec 003). The API only validates the access tokens Auth0 issues for it.
+var auth0 = builder.Configuration.GetSection(Auth0Options.SectionName).Get<Auth0Options>();
+if (string.IsNullOrWhiteSpace(auth0?.Domain) || string.IsNullOrWhiteSpace(auth0.Audience))
+{
+    throw new InvalidOperationException(
+        "Auth0:Domain and Auth0:Audience must be configured. See 'Auth0 setup' in README.md.");
+}
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -32,6 +41,26 @@ builder.Services.AddSwaggerGen(options =>
     {
         Title = "Growcery API",
         Version = "v1"
+    });
+
+    // Swagger UI's Authorize button logs in on Auth0's hosted page (Authorization Code + PKCE) and then sends the
+    // access token on every call.
+    options.AddSecurityDefinition("auth0", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.OAuth2,
+        Flows = new OpenApiOAuthFlows
+        {
+            AuthorizationCode = new OpenApiOAuthFlow
+            {
+                AuthorizationUrl = new Uri($"https://{auth0.Domain}/authorize"),
+                TokenUrl = new Uri($"https://{auth0.Domain}/oauth/token"),
+                Scopes = new Dictionary<string, string>(),
+            },
+        },
+    });
+    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference("auth0", document)] = [],
     });
 });
 
@@ -43,14 +72,6 @@ builder.Services.AddGrowceryCore();
 builder.Services.AddGrowceryData(connectionString);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
-
-// Identity lives in Auth0 (spec 003). The API only validates the access tokens Auth0 issues for it.
-var auth0 = builder.Configuration.GetSection(Auth0Options.SectionName).Get<Auth0Options>();
-if (string.IsNullOrWhiteSpace(auth0?.Domain) || string.IsNullOrWhiteSpace(auth0.Audience))
-{
-    throw new InvalidOperationException(
-        "Auth0:Domain and Auth0:Audience must be configured. See 'Auth0 setup' in README.md.");
-}
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -99,7 +120,13 @@ app.MapControllers();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(options =>
+    {
+        // A public client: no secret, PKCE instead. The audience makes Auth0 issue an access token for this API.
+        options.OAuthClientId(auth0.SwaggerClientId);
+        options.OAuthUsePkce();
+        options.OAuthAdditionalQueryStringParams(new Dictionary<string, string> { ["audience"] = auth0.Audience });
+    });
 }
 
 

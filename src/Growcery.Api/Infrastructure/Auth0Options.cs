@@ -11,4 +11,7 @@ public sealed class Auth0Options
     public string Domain { get; init; } = string.Empty;
 
     public string Audience { get; init; } = string.Empty;
+
+    // The Auth0 Single Page Application that Swagger UI logs in with (Development only, spec 003 D25).
+    public string SwaggerClientId { get; init; } = string.Empty;
 }
