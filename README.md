@@ -241,26 +241,36 @@ There's one tenant per environment: **dev** now, **prod** when hosting is decide
 1. **Create a tenant** on the Free plan (e.g. `growcery-dev`, EU region).
 2. **Applications → APIs → Create API:** name `Growcery API`, identifier **`https://api.growcery.local`** (the
    audience in `appsettings.json`; it doesn't need to resolve), signing algorithm **RS256**. Then, in its
-   **Settings**, set **Maximum Access Token Lifetime** to **3600** seconds.
+   **Settings → Token Settings**, set **both** **Maximum Access Token Lifetime** and **Implicit / Hybrid Flow Access
+   Token Lifetime** to **3600** seconds. If only the first is changed, Auth0 rejects the save with
+   `token_lifetime_for_web cannot be larger than token_lifetime`.
 3. **Applications → Create Application → Single Page Application**, named `Growcery Swagger`. In **Settings**:
    - Allowed Callback URLs: `http://localhost:3030/swagger/oauth2-redirect.html, https://localhost:7220/swagger/oauth2-redirect.html`
    - Allowed Web Origins: `http://localhost:3030, https://localhost:7220`
-4. **Authentication → Database:** make sure `Username-Password-Authentication` is enabled for the SPA. Social
-   connections (e.g. Google) are optional.
-5. **Actions → Library → Build Custom** (trigger *Login / Post Login*), then deploy and add it to the **Post Login**
+   - Leave **Credentials → Authentication Method** as **None** (a public client: no secret, PKCE instead).
+4. **Let the app get tokens for the API:** **Applications → APIs → Growcery API → Application Access**. Under
+   **User Access**, authorize **Growcery Swagger**, or set the policy to **Allow**. Without this, Swagger's login
+   fails with `Client "…" is not authorized to access resource server "https://api.growcery.local"`.
+5. **Authentication → Database:** make sure `Username-Password-Authentication` is enabled for the SPA (its
+   **Connections** tab). Social connections (e.g. Google) are optional.
+6. **Actions → Library → Build Custom** (trigger *Login / Post Login*), then deploy and add it to the **Post Login**
    flow:
    ```js
    exports.onExecutePostLogin = async (event, api) => {
      api.accessToken.setCustomClaim("https://growcery.app/name", event.user.name);
    };
    ```
-6. **Fill in `src/Growcery.Api/appsettings.Development.json`:**
+7. **Fill in `src/Growcery.Api/appsettings.Development.json`:**
    ```json
    "Auth0": { "Domain": "growcery-dev.eu.auth0.com", "SwaggerClientId": "<SPA Client ID>" }
    ```
    These are identifiers, not secrets. Never commit a client **secret** or a Management API token.
-7. **Check the network:** `https://<your-domain>/.well-known/openid-configuration` should open in a browser. If a
+8. **Check the network:** `https://<your-domain>/.well-known/openid-configuration` should open in a browser. If a
    corporate proxy blocks it, the API can't download Auth0's signing keys.
+
+> **Dashboard says "You don't have permissions to access the resource" when saving?** Try an incognito window. A
+> browser extension or an old Auth0 session can cause it. Clearing the `auth0.com` cookies, or disabling extensions
+> for `manage.auth0.com`, fixes the normal window.
 
 ---
 
@@ -332,7 +342,8 @@ In Development, migrations are applied automatically on startup. Other environme
 script (see [spec 001 §7](docs/specs/001-grocery-list-capture-crud.md#7-deployment-and-migrations)).
 
 **Trying it in Swagger:**
-1. Click **Authorize**, then **Authorize** in the `auth0` dialog. Auth0's login page opens. Sign up (first time) or
+1. Click **Authorize**. In the `auth0` dialog, `client_id` is pre-filled. **Leave `client_secret` empty** (PKCE is
+   used instead), then click **Authorize**. Auth0's login page opens. Sign up (first time) or
    log in. You're sent back to Swagger with an access token, which it now sends on every call.
 2. `POST /api/lists` with `{}` to create a list with the default name.
 3. `POST /api/lists/{id}/items` with `{ "name": "Milk", "quantity": 2, "unit": "Litre" }`.

@@ -222,13 +222,19 @@ the domain, audience and client ID (§2.3).
    - Identifier = the audience (e.g. `https://api.growcery.local`). It's a name, not a URL that has to resolve, and it
      can't be changed later.
    - Signing algorithm **RS256**.
-   - Under the API's **Settings**, set **Maximum Access Token Lifetime** to **3600** seconds (1 hour, D26).
+   - Under the API's **Settings → Token Settings**, set **both** **Maximum Access Token Lifetime** and **Implicit /
+     Hybrid Flow Access Token Lifetime** to **3600** seconds (1 hour, D26). Auth0 rejects a "for web" lifetime longer
+     than the maximum (`token_lifetime_for_web cannot be larger than token_lifetime`).
 3. **Applications → Create Application → Single Page Application** (`Growcery Swagger`; a future web app can reuse it or
    get its own):
    - Allowed Callback URLs: `http://localhost:3030/swagger/oauth2-redirect.html, https://localhost:7220/swagger/oauth2-redirect.html`
      (Docker / the VS `http` profile, and the VS `https` profile).
    - Allowed Web Origins: `http://localhost:3030, https://localhost:7220`.
-   - Copy its **Client ID** into `Auth0:SwaggerClientId`.
+   - Copy its **Client ID** into `Auth0:SwaggerClientId`. Its **Authentication Method** stays **None** (a public
+     client). Swagger UI's `client_secret` box is left empty.
+   - **Authorize it for the API:** **APIs → Growcery API → Application Access → User Access**. Authorize this
+     application (or set the policy to Allow). New tenants deny it by default, and login then fails with
+     `Client "…" is not authorized to access resource server "https://api.growcery.local"`.
 4. **Authentication → Database:** keep `Username-Password-Authentication` enabled for the SPA. Social connections
    (e.g. Google) are optional.
 5. **Name claim** (only if §10 Q1 chooses a custom claim): **Actions → Library → Build Custom** (Login / Post Login).
@@ -423,4 +429,5 @@ One commit per step, test-first (AGENTS.md §8), and `dotnet test` passes before
 | 2026-10-30 | Initial draft. D18–D21, open questions Q1–Q5. |
 | 2026-10-30 | D20: hosted login only, and the password-forwarding endpoints rejected. Added the sign-up and login walkthrough to §1. |
 | 2026-10-31 | Q1 → D22 and Q2 → D23. Steps 2 and 3 were done as one commit: the test setup configures `JwtBearerOptions`, which only exists once step 3 registers it, and every commit must pass `dotnet test` (AGENTS.md §8). The tests were still written first and seen failing. Data now pins `Microsoft.EntityFrameworkCore.Relational` 10.0.10, because the removed Identity package used to bring it in, and without it the build has a new version-conflict warning. |
+| 2026-10-31 | §6 corrected from the real dev tenant setup: both token lifetime fields, the API's User Access authorization for the SPA, and the empty `client_secret`. The dev tenant settings are now in `appsettings.Development.json` (D24). |
 | 2026-10-31 | Q3–Q5 → D24–D26. Step 4: Swagger PKCE login, and the Auth0 settings in `appsettings*.json` only, not in compose or `.env` (§2.3). Added `SwaggerTests`. |
