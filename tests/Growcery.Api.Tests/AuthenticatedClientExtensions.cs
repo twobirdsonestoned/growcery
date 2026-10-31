@@ -1,31 +1,22 @@
-using System.Net.Http.Json;
-using Growcery.Api.Models;
-using Growcery.Data.Identity;
+using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Growcery.Api.Tests;
 
 public static class AuthenticatedClientExtensions
 {
-    public const string Password = "P@ssw0rd123!";
-
-    // The auth cookie is Secure outside Development, and HttpClient only sends Secure cookies over https.
+    // Production traffic is HTTPS (it ends at the ingress), so tests call the API over https too.
     public static HttpClient CreateHttpsClient(this GrowceryWebApplicationFactory factory) =>
         factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
 
-    public static async Task<HttpClient> CreateAuthenticatedClientAsync(this GrowceryWebApplicationFactory factory)
+    public static HttpClient CreateClientWithToken(this GrowceryWebApplicationFactory factory, string token)
     {
         var client = factory.CreateHttpsClient();
-        var userName = $"user-{Guid.NewGuid():N}";
-
-        var response = await client.PostAsJsonAsync("/api/account/register", new RegisterViewModel
-        {
-            UserName = userName,
-            Password = Password,
-            ConfirmPassword = Password,
-        });
-
-        Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }
+
+    // A client for a brand-new user: a unique Auth0-style subject, so tests sharing the InMemory database don't collide.
+    public static Task<HttpClient> CreateAuthenticatedClientAsync(this GrowceryWebApplicationFactory factory) =>
+        Task.FromResult(factory.CreateClientWithToken(TestTokens.Create($"test|{Guid.NewGuid():N}")));
 }

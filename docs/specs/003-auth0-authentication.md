@@ -261,12 +261,13 @@ Each test checks the status, the ProblemDetails body and, where relevant, the `W
 | `GetLists_WithWrongIssuer_Returns401` | `401` |
 | `GetLists_WithTokenSignedByOtherKey_Returns401` | `401` |
 | `GetLists_WithUnsignedToken_Returns401` | `401` (`alg: none` rejected) |
+| `GetLists_WithGarbageToken_Returns401` | `401` for a value that isn't a JWT |
 | `GetLists_WithoutTokenAcceptingXml_Returns401` | `401`, not `500` |
 | `GetLists_WithValidToken_Returns200` | `200` `[]` |
 | `GetList_WithAnotherUsersToken_Returns404` | The list created by `sub` A returns `404` for `sub` B |
-| `AccountEndpoints_AreRemoved` | `POST /api/account/login` returns `404` |
-
-The display name test is added once §10 Q1 is answered.
+| `FirstCall_WithNameClaim_CreatesPersonWithThatDisplayName` | The `Person` gets the name claim's value (D22) |
+| `FirstCall_WithoutNameClaim_UsesSubjectAsDisplayName` | The `Person` gets `sub` as its display name (D22) |
+| `AccountEndpoints_AreRemoved_ReturnNotFound` | `POST /api/account/login` and `/register` return `404` |
 
 ### 7.3 Removed tests
 `AccountControllerLoginTests.cs` (3 tests: the Identity cookie on login, no cookie on failure, the `Secure` cookie flag)
@@ -322,6 +323,14 @@ Continues from spec 002 (D11–D17).
   Data Protection prerequisite) and spec 002's "`AccountController` keeps using ASP.NET Identity" (§1, §2.3).
 - **D21 — `Person.ExternalId` is the Auth0 `sub` claim.** It's stored as-is (`auth0|…`, `google-oauth2|…`). It's
   unique within a tenant, and each environment has its own database, so the issuer isn't added to the key.
+- **D22 — The display name comes from a namespaced access-token claim** (answers Q1, 2026-10-31).
+  - An Auth0 Post-Login Action adds `https://growcery.app/name` (§6 step 5).
+  - `HttpCurrentUser.DisplayName` uses that claim, and falls back to `sub` when it's missing or blank.
+  - It's set once, when the `Person` is created (spec 002 D17). A later name change in Auth0 isn't synced, which is
+    acceptable while nothing displays names.
+- **D23 — Local dev databases are reset once** (answers Q2, 2026-10-31). Run `docker compose down -v` after pulling
+  this change. The old `Person` rows hold `AspNetUsers` IDs that no Auth0 user will ever match, and only test data
+  exists.
 
 ---
 
@@ -329,12 +338,13 @@ Continues from spec 002 (D11–D17).
 
 To be answered by the user before implementation, then moved into §9 as decisions (AGENTS.md §3).
 
-1. **Where does `Person.DisplayName` come from?** Auth0 access tokens carry no `name` or `email` claim by default.
+1. ✅ *Answered: a) → D22.* **Where does `Person.DisplayName` come from?** Auth0 access tokens carry no `name` or
+   `email` claim by default.
    - a) A Post-Login Action adds a namespaced claim (`https://growcery.app/name`) to the access token (§6 step 5).
    - b) Use `sub` as the display name for now. Nothing shows display names yet.
    - c) The API calls Auth0's `/userinfo` endpoint. That's a network call per new user, and it needs the `openid
      profile` scopes.
-2. **Existing dev data:** reset local databases once (`docker compose down -v`), so the old `Person` rows tied to
+2. ✅ *Answered: reset → D23.* **Existing dev data:** reset local databases once (`docker compose down -v`), so the old `Person` rows tied to
    Identity IDs disappear? Or keep them as orphans?
 3. **Tenants:** one Auth0 **dev** tenant now, and a separate **prod** tenant when hosting is decided? Or one tenant for
    everything?
@@ -394,3 +404,4 @@ One commit per step, test-first (AGENTS.md §8), and `dotnet test` passes before
 |---|---|
 | 2026-10-30 | Initial draft. D18–D21, open questions Q1–Q5. |
 | 2026-10-30 | D20: hosted login only, and the password-forwarding endpoints rejected. Added the sign-up and login walkthrough to §1. |
+| 2026-10-31 | Q1 → D22 and Q2 → D23. Steps 2 and 3 were done as one commit: the test setup configures `JwtBearerOptions`, which only exists once step 3 registers it, and every commit must pass `dotnet test` (AGENTS.md §8). The tests were still written first and seen failing. Data now pins `Microsoft.EntityFrameworkCore.Relational` 10.0.10, because the removed Identity package used to bring it in, and without it the build has a new version-conflict warning. |

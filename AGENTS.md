@@ -77,7 +77,8 @@ CI (`.github/workflows/tests.yml`) runs build + test on every PR.
 - Use `async`/`await` for all I/O.
 
 ## 6. Security rules
-- Every endpoint uses `[Authorize]`, and authenticates with `Authorization: Bearer <Auth0 access token>`.
+- Every endpoint uses `[Authorize]`, and authenticates with `Authorization: Bearer <Auth0 access token>`. The only
+  exception is the anonymous `GET /api` status endpoint.
 - Token validation always checks the signature (RS256 only), issuer, audience and lifetime. Never disable any of these.
 - Identify the user only through `ICurrentUser` (the token's `sub`), and resolve them to a domain `Person`. Access to a
   list is through `ListMember` membership.

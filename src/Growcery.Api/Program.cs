@@ -3,9 +3,9 @@ using Growcery.Api.Infrastructure;
 using Growcery.Core;
 using Growcery.Core.Abstractions;
 using Growcery.Data;
-using Growcery.Data.Identity;
-using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,33 +44,28 @@ builder.Services.AddGrowceryData(connectionString);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
 
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
-    {
-        options.User.RequireUniqueEmail = false;
-        options.SignIn.RequireConfirmedAccount = false;
-    })
-    .AddEntityFrameworkStores<ApplicationDbContext>()
-    .AddDefaultTokenProviders();
-
-builder.Services.ConfigureApplicationCookie(options =>
+// Identity lives in Auth0 (spec 003). The API only validates the access tokens Auth0 issues for it.
+var auth0 = builder.Configuration.GetSection(Auth0Options.SectionName).Get<Auth0Options>();
+if (string.IsNullOrWhiteSpace(auth0?.Domain) || string.IsNullOrWhiteSpace(auth0.Audience))
 {
-    // HTTPS ends at the Azure Container Apps ingress, so SameAsRequest wouldn't mark the cookie Secure.
-    if (!builder.Environment.IsDevelopment())
-    {
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-    }
+    throw new InvalidOperationException(
+        "Auth0:Domain and Auth0:Audience must be configured. See 'Auth0 setup' in README.md.");
+}
 
-    // API clients get a ProblemDetails status code instead of a redirect to a login page.
-    options.Events.OnRedirectToLogin = context =>
-        WriteProblemAsync(context.HttpContext, StatusCodes.Status401Unauthorized);
-    options.Events.OnRedirectToAccessDenied = context =>
-        WriteProblemAsync(context.HttpContext, StatusCodes.Status403Forbidden);
-
-    static Task WriteProblemAsync(HttpContext httpContext, int statusCode)
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
     {
-        return Results.Problem(statusCode: statusCode).ExecuteAsync(httpContext);
-    }
-});
+        // Signing keys are downloaded from the tenant's JWKS endpoint and cached.
+        options.Authority = $"https://{auth0.Domain}/";
+        options.Audience = auth0.Audience;
+
+        // Keep JWT claim names as issued ("sub"), instead of mapping them to WS-* claim types.
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters.NameClaimType = Auth0Options.NameClaim;
+        options.TokenValidationParameters.ValidAlgorithms = [SecurityAlgorithms.RsaSha256];
+        options.TokenValidationParameters.ClockSkew = TimeSpan.FromSeconds(30);
+    });
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
