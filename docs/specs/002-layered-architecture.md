@@ -10,6 +10,11 @@
 > **For AI agents and developers:** Follow the repo rules in [`/AGENTS.md`](../../AGENTS.md). This spec defines
 > **what** to change. AGENTS.md defines **how**.
 
+> **⚠ Auth superseded by [spec 003](003-auth0-authentication.md)** (D20, D21). ASP.NET Core Identity, its tables and
+> `AccountController` are removed. The API validates Auth0 JWT access tokens, and `Person.ExternalId` holds the
+> Auth0 `sub` instead of `AspNetUsers.Id`. That affects §1 Out of scope, §2.2 (`IdentityDbContext`), §2.3 and the
+> `AspNetUsers` relation in the §3 ERD. Everything else still holds.
+
 ---
 
 ## 1. Goal

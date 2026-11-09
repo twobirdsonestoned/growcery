@@ -10,12 +10,14 @@ structured.
 
   | Project | Layer | Contains |
   |---|---|---|
-  | `src/Growcery.Api` | Presentation | Controllers, HTTP contracts, auth (Identity cookies), DI composition root (`Program.cs`) |
+  | `src/Growcery.Api` | Presentation | Controllers, HTTP contracts, auth (JWT bearer validation of Auth0 tokens, spec 003), DI composition root (`Program.cs`) |
   | `src/Growcery.Core` | Business | Domain entities and rules, services, and the interfaces other layers implement |
-  | `src/Growcery.Data` | Data | EF Core + Npgsql (PostgreSQL), repositories, Identity stores, migrations |
+  | `src/Growcery.Data` | Data | EF Core + Npgsql (PostgreSQL), repositories, migrations |
   | `tests/Growcery.Core.Tests` | — | Unit tests for Core, using in-memory fakes |
   | `tests/Growcery.Api.Tests` | — | Integration tests through HTTP (`WebApplicationFactory` + EF InMemory) |
 - There is no frontend yet.
+- **Identity is external (Auth0, spec 003).** The API is a resource server only. It validates access tokens and never
+  stores passwords, issues tokens or sets auth cookies. Don't add account, login or token endpoints.
 - The hosting target is **Azure Container Apps**, running the existing `Dockerfile` image. HTTPS ends at the ingress,
   so the app receives plain HTTP. Don't propose Azure Functions (rejected: it would mean rewriting the controllers and
   the auth).
@@ -49,9 +51,8 @@ CI (`.github/workflows/tests.yml`) runs build + test on every PR.
   implement them, and DI wires them up in `Program.cs` through `AddGrowceryCore()` and `AddGrowceryData()`.
 - **Business logic and validation live in Core**, in domain entities and services. Controllers only translate HTTP to
   service calls and results back to HTTP. They don't hold business rules or DataAnnotations validation.
-- **Controllers inject Core service interfaces only.** Never inject `ApplicationDbContext`, repositories or `UserManager`
-  into grocery controllers. (`AccountController` is the exception: it uses Identity, which belongs to the presentation
-  layer.)
+- **Controllers inject Core service interfaces only.** Never inject `ApplicationDbContext` or repositories into
+  controllers.
 - **Services return `Result`/`Result<T>`** (`Ok`, `NotFound`, `Invalid`), never HTTP types. Api maps them with
   `ToActionResult()`.
 - **Repositories return domain entities**, never EF types or `IQueryable`. Read-only queries use `AsNoTracking()`.
@@ -66,7 +67,7 @@ CI (`.github/workflows/tests.yml`) runs build + test on every PR.
 - **Response contracts** are `sealed record`s in `Growcery.Api/Contracts`. **Never return domain or EF entities from
   endpoints.**
 - **Errors:** every non-2xx response from the domain endpoints is **ProblemDetails** (`application/problem+json`).
-  `Invalid` results become `ValidationProblemDetails`. `ErrorResponse` is legacy, used only by the account endpoints.
+  `Invalid` results become `ValidationProblemDetails`. Authentication failures (`401`) are ProblemDetails too.
 - **OpenAPI:** every action declares its responses with `[ProducesResponseType]`, success and error codes. Don't add
   `[Produces("application/json")]`, because it turns ProblemDetails into plain `application/json`.
 - **Timestamps:** use `IClock.UtcNow`. Never call `DateTimeOffset.UtcNow` for persisted values.
@@ -76,21 +77,24 @@ CI (`.github/workflows/tests.yml`) runs build + test on every PR.
 - Use `async`/`await` for all I/O.
 
 ## 6. Security rules
-- Every endpoint outside `api/account` uses `[Authorize]`.
-- Identify the user only through `ICurrentUser`, and resolve them to a domain `Person`. Access to a list is through
-  `ListMember` membership.
+- Every endpoint uses `[Authorize]`, and authenticates with `Authorization: Bearer <Auth0 access token>`. The only
+  exception is the anonymous `GET /api` status endpoint.
+- Token validation always checks the signature (RS256 only), issuer, audience and lifetime. Never disable any of these.
+- Identify the user only through `ICurrentUser` (the token's `sub`), and resolve them to a domain `Person`. Access to a
+  list is through `ListMember` membership.
 - **Never** accept owner, person or user IDs from the request body or query string.
 - A resource the caller can't access returns **`404`**, not `403`, so the API doesn't reveal which IDs exist.
 - Unauthenticated API calls must return **`401`**, never a `302` redirect.
+- Never log tokens or the `Authorization` header.
 - Never commit secrets. Connection strings come from environment variables (see `.env.example`,
-  `docker-compose.yml`).
+  `docker-compose.yml`). The `Auth0:*` settings aren't secrets, but never commit an Auth0 client secret or
+  Management API token.
 
 ## 7. Database and migrations
 - Any change to an entity configuration or `ApplicationDbContext` needs a **new migration** in
   `src/Growcery.Data/Migrations`, committed together with the model change.
 - Map domain entities with `IEntityTypeConfiguration<T>` in `src/Growcery.Data/Configurations`. Domain classes stay
   free of persistence attributes.
-- In `OnModelCreating`, call `base.OnModelCreating(builder)` **first** (Identity needs it).
 - **Never edit or delete a migration that's already on `main`.** Add a new one instead. A mechanical namespace or file
   move is allowed only if the generated SQL is shown to be identical.
 - Before committing, review each generated migration's foreign keys, cascade rules, indexes and column types.
@@ -101,9 +105,9 @@ CI (`.github/workflows/tests.yml`) runs build + test on every PR.
 - **Business rules:** unit-test them in `tests/Growcery.Core.Tests` with the in-memory fakes (no database, no HTTP).
 - **Endpoints:** integration-test them in `tests/Growcery.Api.Tests` with `GrowceryWebApplicationFactory` via
   `IClassFixture<>`.
-  - Use a unique user per test (`CreateAuthenticatedClientAsync()`), because the InMemory database is shared by all
-    tests in a class.
-  - Clients use `https://localhost` because the auth cookie is `Secure` outside Development.
+  - Use a unique user per test (`CreateAuthenticatedClientAsync()` sends a Bearer token for a new `sub`), because the
+    InMemory database is shared by all tests in a class.
+  - Tests sign their own JWTs (`TestTokens`) and **never call Auth0** or any other network service.
 - Name tests `Method_Condition_ExpectedResult` (e.g. `Create_WithEmptyName_ReturnsBadRequest`).
 - Check status codes **and** response bodies. For security rules, add a test that a non-member gets `404`.
 - `dotnet test` must pass before **every** commit.
